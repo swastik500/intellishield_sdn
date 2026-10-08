@@ -370,3 +370,50 @@ def adapt_ssl_unavailable(
         reason="ssl_zero_day_not_implemented_r2_pending",
         timestamp=timestamp,
     )
+
+
+def adapt_ssl_result(
+    ssl_input: Any = None,
+    *,
+    timestamp: Optional[datetime] = None,
+    health: Any = DetectorHealth.SUCCESS,
+) -> DetectorResult:
+    """SSLZeroDayDetector output / dict payload → DetectorResult (PRIMARY)."""
+    try:
+        if ssl_input is None:
+            return unavailable(DetectorType.SSL, reason="ssl_result_missing", timestamp=timestamp)
+        if isinstance(ssl_input, DetectorResult):
+            return ssl_input
+        if not isinstance(ssl_input, dict):
+            return unavailable(DetectorType.SSL, reason="ssl_result_invalid_type", timestamp=timestamp)
+        mapped_health = map_detector_health(health)
+        if mapped_health is DetectorHealth.ERROR:
+            return unavailable(DetectorType.SSL, reason="ssl_health_error", timestamp=timestamp)
+
+        status = ssl_input.get("status")
+        decision = _decision_from_status(status, default=DetectionDecision.NONE)
+        conf = to_unit_confidence(ssl_input.get("confidence"))
+        score = finite_or_none(ssl_input.get("mse_score") if "mse_score" in ssl_input else ssl_input.get("score"))
+        thresh = finite_or_none(ssl_input.get("threshold"))
+        hint = "ZERO_DAY_ANOMALY" if decision is DetectionDecision.ATTACK else None
+
+        return DetectorResult(
+            detector=DetectorType.SSL,
+            timestamp=_ts(timestamp),
+            health=mapped_health,
+            decision=decision,
+            confidence=conf,
+            score=score,
+            threshold=thresh,
+            attack_hint=hint,
+            evidence={
+                "role": EvidenceRole.PRIMARY_DETECTION.value,
+                "raw_status": status,
+                "mse_score": score,
+                "threshold": thresh,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[adapt_ssl_result] failed", exc_info=True)
+        return unavailable(DetectorType.SSL, reason=f"adapter_error:{exc}", timestamp=timestamp)
+

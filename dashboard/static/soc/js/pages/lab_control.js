@@ -151,6 +151,7 @@ export async function renderLabControl(root) {
       <button type="button" class="btn-warn" data-lab-action="s3">S3 UDP Flood</button>
       <button type="button" class="btn-warn" data-lab-action="s4">S4 Burst</button>
       <button type="button" class="btn-warn" data-lab-action="s5">S5 Mixed</button>
+      <button type="button" class="btn-warn" data-lab-action="s6">S6 Zero-Day (SSL)</button>
       <button type="button" class="btn-primary" data-lab-action="batch">Run S3+S4+S5 (full eval)</button>
     </div>
     ${sectionHeader("Evaluation & ML", "")}
@@ -184,6 +185,7 @@ export async function renderLabControl(root) {
   bind("s3", () => runAction(root, "scenario/3", () => controlApi.runScenario("3")));
   bind("s4", () => runAction(root, "scenario/4", () => controlApi.runScenario("4")));
   bind("s5", () => runAction(root, "scenario/5", () => controlApi.runScenario("5")));
+  bind("s6", () => runAction(root, "scenario/6", () => controlApi.runScenario("6")));
   bind("batch", () => {
     if (!confirm("Run Scenarios 3, 4, 5 with archive + controller restart? (~8 min)")) return;
     runAction(root, "scenarios/batch", () => controlApi.runScenarioBatch());

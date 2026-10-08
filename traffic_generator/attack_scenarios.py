@@ -494,14 +494,84 @@ def scenario_5_mixed_attacks(net,
         log_scenario_event(name, "END", "Scenario 5 complete")
 
 
+# ─── Scenario 6: Self-Supervised Zero-Day Attack (SSL Evaluation) ───────────
+
+def scenario_6_zero_day_ssl(net,
+                             baseline_sec: int = 20,
+                             attack_sec: int = 30,
+                             recovery_sec: int = 10,
+                             attacker: Optional[str] = None,
+                             target: Optional[str] = None) -> None:
+    """
+    Scenario 6 — Self-Supervised Zero-Day (SSL) Attack Evaluation.
+
+    Purpose:
+        Simulates an unseen, novel Zero-Day attack pattern (combining high-rate
+        port sweep and irregular payload bursts) to evaluate the Self-Supervised
+        Zero-Day (SSL) Autoencoder detector.
+
+    Timeline:
+        0s              : Normal ICMP background baseline
+        baseline_sec    : Launch novel Zero-Day flood h1 → h2
+        +attack_sec     : Stop Zero-Day attack
+        +recovery_sec   : End & log
+    """
+    name     = "SCENARIO_6_ZERO_DAY_SSL"
+    hosts    = _default_hosts(net, 4)
+    attacker = attacker or hosts[0]
+    target   = target or hosts[1]
+
+    gen = NormalTrafficGenerator(net)
+    atk = AttackGenerator(net)
+
+    log_scenario_event(name, "START",
+                       f"SSL Zero-Day attack: {attacker}→{target} attack={attack_sec}s")
+
+    print("\n" + "─" * 56)
+    print(f"  SCENARIO 6: Self-Supervised Zero-Day (SSL) Attack")
+    print(f"  Attacker: {attacker}  Target: {target}")
+    print(f"  Baseline: {baseline_sec}s  Attack: {attack_sec}s  Recovery: {recovery_sec}s")
+    print("─" * 56)
+
+    try:
+        # Phase A: Normal baseline
+        log_scenario_event(name, "PHASE_A", "Normal baseline")
+        for i in range(len(hosts)):
+            gen.generate_continuous_icmp(hosts[i], hosts[(i + 1) % len(hosts)])
+        _wait(baseline_sec, "Normal baseline")
+
+        # Phase B: Launch novel Zero-Day attack (combined burst + SYN/UDP flood)
+        log_scenario_event(name, "ATTACK_START", f"Zero-day SSL attack: {attacker} → {target}")
+        atk.launch_syn_flood(attacker, target, rate=1500, duration=attack_sec, rand_source=True)
+        atk.launch_burst_attack(attacker, target, burst_duration=min(15, attack_sec), rate=3000)
+
+        _wait(attack_sec, "Zero-day SSL attack running")
+
+        # Phase C: Stop attack
+        log_scenario_event(name, "ATTACK_STOP", "Zero-day SSL attack stopped")
+        atk.stop_attack(attacker)
+        _wait(recovery_sec, "Recovery monitoring")
+
+    except KeyboardInterrupt:
+        logger.info("[%s] Interrupted.", name)
+    except Exception:
+        logger.error("[%s] Error: %s", name, traceback.format_exc())
+        log_scenario_event(name, "ERROR", traceback.format_exc(), status="ERROR")
+    finally:
+        atk.stop_all_attacks()
+        gen.stop_all_traffic(hosts)
+        log_scenario_event(name, "END", "Scenario 6 complete")
+
+
 # ─── Scenario Registry ────────────────────────────────────────────────────────
 
 SCENARIO_REGISTRY = {
-    "1": ("Normal baseline",       scenario_1_normal_only),
-    "2": ("SYN flood attack",      scenario_2_syn_flood),
-    "3": ("UDP flood attack",      scenario_3_udp_flood),
-    "4": ("Burst attack",          scenario_4_burst_attack),
+    "1": ("Normal baseline",          scenario_1_normal_only),
+    "2": ("SYN flood attack",         scenario_2_syn_flood),
+    "3": ("UDP flood attack",         scenario_3_udp_flood),
+    "4": ("Burst attack",             scenario_4_burst_attack),
     "5": ("Mixed sequential attacks", scenario_5_mixed_attacks),
+    "6": ("Zero-Day (SSL) attack",    scenario_6_zero_day_ssl),
 }
 
 
@@ -511,7 +581,7 @@ def run_scenario(net, scenario_id: str) -> None:
 
     Args:
         net         : Mininet net object.
-        scenario_id : "1" through "5".
+        scenario_id : "1" through "6".
     """
     if scenario_id not in SCENARIO_REGISTRY:
         logger.error("[run_scenario] Unknown scenario ID: '%s'. Valid: %s",
@@ -521,3 +591,4 @@ def run_scenario(net, scenario_id: str) -> None:
     name, func = SCENARIO_REGISTRY[scenario_id]
     logger.info("[run_scenario] Starting: %s — %s", scenario_id, name)
     func(net)
+

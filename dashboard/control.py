@@ -41,6 +41,7 @@ SCENARIOS = {
     "3": "UDP flood h1→h2",
     "4": "Burst attack",
     "5": "Mixed SYN + UDP",
+    "6": "S6 Zero-Day (SSL) attack",
 }
 
 
