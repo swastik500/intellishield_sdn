@@ -19,6 +19,7 @@ const ROUTES = {
   verification: { title: "Verification", render: pages.renderVerification },
   correlation: { title: "Cross-Layer Correlation", render: pages.renderCorrelation },
   adaptive: { title: "Adaptive RL / Drift", render: pages.renderAdaptive },
+  automl: { title: "Online AutoML", render: pages.renderAutoML },
   mitigation: { title: "Mitigation Status", render: pages.renderMitigation },
   alerts: { title: "Security Alerts", render: pages.renderAlerts },
   events: { title: "Security Events", render: investigationPages.renderEvents },
@@ -66,7 +67,9 @@ function setActiveNav(routeName) {
         ? "LAB CONTROL · WRITE"
         : routeName === "commands"
           ? "COMMAND CENTER · SAFE"
-          : "DDoS DASHBOARD";
+          : routeName === "automl"
+            ? "ONLINE AUTOML · OPERATIONAL"
+            : "DDoS DASHBOARD";
   }
 }
 

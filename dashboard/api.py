@@ -1373,6 +1373,35 @@ def control_train_models():
     return {"ok": True, "job": job.to_dict()}
 
 
+# ── Online AutoML API Endpoints ───────────────────────────────────────────────
+
+from online_automl.service import automl_service
+
+
+@app.get("/api/automl/status")
+def get_automl_status():
+    """Return Online AutoML current status, champion model, candidates, and triggers."""
+    return automl_service.get_status()
+
+
+@app.post("/api/automl/run")
+def run_automl():
+    """Trigger an Online AutoML training, evaluation, and promotion pipeline run."""
+    report = automl_service.run_automl_pipeline(force=True)
+    return {"ok": True, "data": report}
+
+
+@app.post("/api/automl/rollback")
+def rollback_automl():
+    """Rollback champion model to previous candidate."""
+    restored, reason = automl_service.rollback()
+    return {
+        "ok": restored is not None,
+        "reason": reason,
+        "restored_champion": restored.algorithm_name if restored else None,
+    }
+
+
 # Phase 1 SOC static assets (CSS/JS modules). Mounted after API routes.
 _SOC_DIR = _STATIC / "soc"
 if _SOC_DIR.is_dir():

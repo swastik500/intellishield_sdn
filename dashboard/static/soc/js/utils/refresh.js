@@ -97,6 +97,7 @@ export const POLLED_ROUTES = new Set([
   "fusion",
   "verification",
   "adaptive",
+  "automl",
   "alerts",
   "health",
   "mitigation",

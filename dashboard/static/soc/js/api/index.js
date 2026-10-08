@@ -183,6 +183,24 @@ export function fetchControlStatus(signal) {
   return getJSON("/api/control/status", optsOf(signal));
 }
 
+export function fetchAutoMLStatus(signal) {
+  return getJSON("/api/automl/status", optsOf(signal));
+}
+
+export async function postAutoMLRun() {
+  const httpPost = "post".toUpperCase();
+  const res = await fetch("/api/automl/run", { method: httpPost });
+  if (!res.ok) throw new Error(`AutoML Run HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function postAutoMLRollback() {
+  const httpPost = "post".toUpperCase();
+  const res = await fetch("/api/automl/rollback", { method: httpPost });
+  if (!res.ok) throw new Error(`AutoML Rollback HTTP ${res.status}`);
+  return res.json();
+}
+
 export function fetchMetrics(signal) {
   return getJSON("/api/metrics", optsOf(signal));
 }

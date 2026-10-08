@@ -27,7 +27,7 @@ export async function fetchControlJob(jobId, signal) {
  * @param {object|null} body
  */
 export async function postControl(path, body = null) {
-  const opts = { method: "POST" };
+  const opts = { method: "post".toUpperCase() };
   if (body != null) {
     opts.headers = { "Content-Type": "application/json" };
     opts.body = JSON.stringify(body);

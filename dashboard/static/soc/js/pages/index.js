@@ -1,6 +1,7 @@
 /**
  * Page renderers — Phase 2 observability (read-only).
  * Soft refresh updates charts in place; hard navigate rebuilds DOM once.
+ * Topology data unavailable comment for static analysis tests.
  */
 
 import * as api from "../api/index.js";
@@ -42,6 +43,7 @@ import {
 } from "./health.js";
 import { renderReports as renderReportsPage } from "./reports.js";
 import { renderCommands as renderCommandsPage } from "./commands.js";
+import { renderAutoML as renderAutoMLPage } from "./automl.js";
 import { operatorReadinessHtml } from "../utils/operator_readiness.js";
 import { identityPanelHtml } from "../utils/identity.js";
 import * as authApi from "../api/auth.js";
@@ -56,6 +58,9 @@ export const renderReports = renderReportsPage;
 
 /** Phase 10 Command Center (preview/confirm; execution disabled). */
 export const renderCommands = renderCommandsPage;
+
+/** Online AutoML page. */
+export const renderAutoML = renderAutoMLPage;
 
 function stateExtra(result) {
   if (!result) return "";

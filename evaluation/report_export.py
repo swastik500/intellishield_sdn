@@ -196,7 +196,7 @@ def export_paper_tables_md(report: Dict, path: str) -> None:
         lines.append(f"  Formula: `{meta.get('formula', '')}`  ")
         lines.append("")
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
 
