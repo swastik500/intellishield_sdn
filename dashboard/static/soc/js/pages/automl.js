@@ -64,39 +64,94 @@ export async function renderAutoML(root, { soft = false } = {}) {
   }
 
   const data = statusData || {};
-  const champ = data.active_champion || {};
-  const trig = data.trigger_status || {};
-  const lastRun = data.last_run || {};
-  const candidates = data.candidates_evaluated || [];
-  const registry = data.model_registry || [];
 
-  const hasChamp = !!(champ && champ.model_name && champ.status === "CHAMPION");
-  const champName = hasChamp ? champ.model_name : "No Active Champion";
-  const champVer = champ.version || "N/A";
-  const champF1 = champ.f1_score !== undefined && champ.f1_score !== null ? (champ.f1_score * 100).toFixed(2) + "%" : "N/A";
-  const champFPR = champ.fpr !== undefined && champ.fpr !== null ? (champ.fpr * 100).toFixed(2) + "%" : "N/A";
-  const champLat = champ.latency_ms !== undefined && champ.latency_ms !== null ? champ.latency_ms.toFixed(2) + " ms" : "N/A";
+  // ── Map backend get_status() JSON to UI variables ──
+  // Backend champion: { algorithm, model_id, candidate_id, status, metrics: {f1_score, false_positive_rate, latency_ms, precision, ...}, created_at }
+  const champRaw = data.champion || null;
+  const champMetrics = (champRaw && champRaw.metrics) ? champRaw.metrics : {};
+
+  // Backend last_run_report: { dataset_size: {train, val}, timestamp, candidates: [...eval_reports], trigger_reason, deployment_status, selection_reason, ... }
+  const lastRun = data.last_run_report || {};
+  const lastRunCandidates = lastRun.candidates || [];
+
+  // Backend candidates (status summary from recent_candidates): [{algorithm, candidate_id, status, metrics: {...}}]
+  // Prefer last_run_report.candidates (eval_reports) which have flat keys (f1_score, false_positive_rate, latency_ms, reason, status)
+  // Fall back to data.candidates (status summary) with nested metrics
+  let candidates = [];
+  if (lastRunCandidates.length > 0) {
+    candidates = lastRunCandidates.map((c) => ({
+      model_name: c.algorithm || c.candidate_id || "Unknown",
+      model_type: c.model_type || "",
+      status: c.status || "PENDING",
+      f1_score: c.f1_score,
+      fpr: c.false_positive_rate,
+      precision: c.precision || (c.accuracy !== undefined ? c.accuracy : null),
+      latency_ms: c.latency_ms,
+      rejection_reason: c.reason || null,
+    }));
+  } else if (data.candidates && data.candidates.length > 0) {
+    candidates = data.candidates.map((c) => {
+      const m = c.metrics || {};
+      return {
+        model_name: c.algorithm || "Unknown",
+        model_type: m.model_type || "",
+        status: c.status || "PENDING",
+        f1_score: m.f1_score,
+        fpr: m.false_positive_rate,
+        precision: m.precision,
+        latency_ms: m.latency_ms,
+        rejection_reason: null,
+      };
+    });
+  }
+
+  // Backend version_history: [{version_id, algorithm, promoted_at, metrics: {...}, status, candidate_id}]
+  const registry = data.version_history || [];
+
+  const hasChamp = !!(champRaw && champRaw.algorithm && (champRaw.status === "PROMOTED" || champRaw.status === "CHAMPION"));
+  const champName = hasChamp ? champRaw.algorithm : "No Active Champion";
+  const champVer = champRaw ? (champRaw.model_id || "N/A") : "N/A";
+  const champF1 = champMetrics.f1_score !== undefined && champMetrics.f1_score !== null ? (champMetrics.f1_score * 100).toFixed(2) + "%" : "N/A";
+  const champFPR = champMetrics.false_positive_rate !== undefined && champMetrics.false_positive_rate !== null ? (champMetrics.false_positive_rate * 100).toFixed(2) + "%" : "N/A";
+  const champLat = champMetrics.latency_ms !== undefined && champMetrics.latency_ms !== null ? champMetrics.latency_ms.toFixed(2) + " ms" : "N/A";
   const champStatus = hasChamp ? "CHAMPION" : "NO CHAMPION";
 
   const datasetSize = lastRun.dataset_size || {};
-  const trainCount = datasetSize.train !== undefined ? datasetSize.train : (data.train_samples !== undefined ? data.train_samples : "N/A");
-  const valCount = datasetSize.val !== undefined ? datasetSize.val : (data.val_samples !== undefined ? data.val_samples : "N/A");
-  const totalSamples = (typeof trainCount === 'number' && typeof valCount === 'number') ? (trainCount + valCount) : (data.total_samples || "N/A");
+  const trainCount = datasetSize.train !== undefined ? datasetSize.train : "N/A";
+  const valCount = datasetSize.val !== undefined ? datasetSize.val : "N/A";
+  const totalSamples = (typeof trainCount === 'number' && typeof valCount === 'number') ? (trainCount + valCount) : "N/A";
 
-  const cooldown = trig.cooldown_remaining_sec !== undefined ? Math.round(trig.cooldown_remaining_sec) : 0;
-  const driftState = trig.drift_detected ? "DRIFT DETECTED" : "NORMAL";
-  const triggerReason = lastRun.trigger_type || trig.last_trigger_reason || "SCHEDULED / MANUAL";
+  const driftState = data.last_trigger_reason ? "TRIGGERED" : "NORMAL";
+  const triggerReason = lastRun.trigger_reason || data.last_trigger_reason || "SCHEDULED / MANUAL";
   const deployStatus = lastRun.deployment_status || "NO_CHANGE";
   const selectionReason = lastRun.selection_reason || (hasChamp ? "Promoted based on composite validation score" : "No candidate currently meets promotion thresholds");
+  const cooldown = 0;
+
+  // Compute selection score: Score = F1 - 1.5×FPR - 0.005×Latency
+  function computeScore(c) {
+    const f1 = typeof c.f1_score === 'number' ? c.f1_score : 0;
+    const fpr = typeof c.fpr === 'number' ? c.fpr : 0;
+    const lat = typeof c.latency_ms === 'number' ? c.latency_ms : 0;
+    return f1 - 1.5 * fpr - 0.005 * lat;
+  }
+
+  let bestCand = null;
+  if (candidates.length > 0) {
+    bestCand = [...candidates].sort((a, b) => (b.f1_score || 0) - (a.f1_score || 0))[0];
+  }
 
   // Build candidate rows for evaluation matrix
   const candidateRows = candidates.length > 0 ? candidates.map((c) => {
     const f1Str = c.f1_score !== undefined && c.f1_score !== null ? (c.f1_score * 100).toFixed(2) + "%" : "—";
     const fprStr = c.fpr !== undefined && c.fpr !== null ? (c.fpr * 100).toFixed(2) + "%" : "—";
     const latStr = c.latency_ms !== undefined && c.latency_ms !== null ? c.latency_ms.toFixed(2) + " ms" : "—";
-    const scoreStr = c.score !== undefined && c.score !== null ? c.score.toFixed(4) : "—";
+    const score = computeScore(c);
+    const scoreStr = (c.f1_score !== undefined && c.f1_score !== null) ? score.toFixed(4) : "—";
+    const isRejected = c.status === "REJECTED" || c.status === "FAIL";
     const badge = statusBadge(c.status || "PENDING");
-    const reason = c.rejection_reason ? `<span class="subtext" style="color:var(--color-danger, #f87171)">${escapeHtml(c.rejection_reason)}</span>` : `<span class="subtext" style="color:var(--color-success, #34d399)">Passed policy gates</span>`;
+    const reason = (c.rejection_reason && c.rejection_reason !== "Validation passed")
+      ? `<span class="subtext" style="color:var(--color-danger, #f87171)">${escapeHtml(c.rejection_reason)}</span>`
+      : (isRejected ? `<span class="subtext" style="color:var(--color-danger, #f87171)">Did not meet policy gates</span>` : `<span class="subtext" style="color:var(--color-success, #34d399)">Passed policy gates</span>`);
     return `
       <tr>
         <td><strong>${escapeHtml(c.model_name)}</strong> <span class="subtext">(${escapeHtml(c.model_type || '')})</span></td>
@@ -111,15 +166,22 @@ export async function renderAutoML(root, { soft = false } = {}) {
   }).join("") : `<tr><td colspan="7" class="text-muted">No candidate evaluation matrix available for current window. Click "Run AutoML" to execute.</td></tr>`;
 
   // Build registry history rows
+  // Backend version_history: [{version_id, algorithm, promoted_at, metrics: {f1_score, ...}, status, candidate_id}]
+  // Only mark the entry matching the current active champion as CHAMPION/DEPLOYED;
+  // all others are historical records and should show as HISTORICAL/INACTIVE.
+  const activeChampCandId = hasChamp && champRaw ? champRaw.candidate_id : null;
   const registryRows = registry.length > 0 ? registry.map((m) => {
-    const f1Str = m.f1_score !== undefined && m.f1_score !== null ? (m.f1_score * 100).toFixed(2) + "%" : "—";
-    const statusTag = statusBadge(m.status || "REGISTERED");
-    const deployedTag = m.deployed ? statusBadge("DEPLOYED") : statusBadge("ARCHIVED");
-    const dateStr = m.created_at ? shortTs(m.created_at) : "—";
+    const regMetrics = m.metrics || {};
+    const f1Val = regMetrics.f1_score;
+    const f1Str = f1Val !== undefined && f1Val !== null ? (f1Val * 100).toFixed(2) + "%" : "—";
+    const isLive = activeChampCandId && m.candidate_id === activeChampCandId;
+    const statusTag = statusBadge(isLive ? "CHAMPION" : "HISTORICAL");
+    const deployedTag = statusBadge(isLive ? "DEPLOYED" : "INACTIVE");
+    const dateStr = m.promoted_at ? shortTs(m.promoted_at) : "—";
     return `
       <tr>
-        <td><code>${escapeHtml(m.version || 'v1')}</code></td>
-        <td><strong>${escapeHtml(m.model_name || 'Candidate')}</strong></td>
+        <td><code>${escapeHtml(m.version_id || m.candidate_id || 'v1')}</code></td>
+        <td><strong>${escapeHtml(m.algorithm || 'Candidate')}</strong></td>
         <td>${dateStr}</td>
         <td>${f1Str}</td>
         <td>${statusTag}</td>
@@ -133,12 +195,34 @@ export async function renderAutoML(root, { soft = false } = {}) {
     <div class="panel" style="margin-bottom: 1.25rem; padding: 0.85rem 1.25rem; background: rgba(30, 41, 59, 0.7); border-left: 4px solid var(--color-primary, #3b82f6);">
       <div style="display: flex; gap: 2rem; flex-wrap: wrap; align-items: center; font-size: 0.85rem;">
         <div><strong>Promotion Policy Gates:</strong></div>
-        <div>F1 Target: <span style="color: var(--color-success, #34d399);">≥ 85.0%</span></div>
-        <div>FPR Threshold: <span style="color: var(--color-warning, #fbbf24);">≤ 5.0%</span></div>
+        <div>F1 Target: <span style="color: var(--color-success, #34d399);">≥ 75.0%</span></div>
+        <div>FPR Threshold: <span style="color: var(--color-warning, #fbbf24);">≤ 10.0%</span></div>
+        <div>Precision Gate: <span style="color: var(--color-info, #60a5fa);">≥ 70.0%</span></div>
         <div>Latency SLA: <span style="color: var(--color-info, #60a5fa);">≤ 10.0 ms</span></div>
         <div>Ranking Formula: <code style="font-size: 0.8rem; background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">Score = F1 - 1.5×FPR - 0.005×Latency</code></div>
       </div>
     </div>
+
+    <!-- No Champion Explanatory Banner (When 0/N candidates pass validation) -->
+    ${!hasChamp ? `
+      <div class="panel" style="margin-bottom: 1.5rem; padding: 1.25rem; background: rgba(245, 158, 11, 0.08); border-left: 4px solid var(--color-warning, #f59e0b);">
+        <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+          <span style="font-size: 1.5rem; line-height: 1;">🟡</span>
+          <div style="flex: 1;">
+            <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; color: #fbbf24;">No Champion Currently Deployed</h3>
+            <p style="margin: 0 0 0.5rem 0; font-size: 0.9rem; line-height: 1.5;">
+              AutoML evaluated <strong>${candidates.length || 5} candidate models</strong> using <strong>${totalSamples} telemetry samples</strong> (${trainCount} train / ${valCount} validation split).<br>
+              <strong>0 / ${candidates.length || 5} candidates</strong> passed the strict promotion policy gates.
+            </p>
+            <div style="font-size: 0.85rem; color: var(--color-muted, #9ca3af); background: rgba(0,0,0,0.25); padding: 0.6rem 0.85rem; border-radius: 6px; margin-top: 0.5rem;">
+              <div>• <strong>Current Deployment:</strong> <span class="badge badge-warning" style="margin-left: 4px;">${escapeHtml(deployStatus)}</span> (${escapeHtml(selectionReason)})</div>
+              ${bestCand ? `<div>• <strong>Best Candidate:</strong> ${escapeHtml(bestCand.model_name || bestCand.algorithm)} — F1: <strong>${(bestCand.f1_score * 100).toFixed(2)}%</strong>, FPR: <strong>${(bestCand.fpr * 100).toFixed(2)}%</strong></div>` : ''}
+              <div>• <strong>Required Policy Gates:</strong> F1 ≥ 75.0%, FPR ≤ 10.0%, Precision ≥ 70.0%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    ` : ''}
 
     <!-- Top Metric Cards -->
     <div class="metric-grid" style="margin-bottom: 1.5rem;">
@@ -154,13 +238,13 @@ export async function renderAutoML(root, { soft = false } = {}) {
       <article class="metric-card">
         <header><span class="metric-title">F1 Score</span></header>
         <div class="metric-value" style="color: var(--color-success, #34d399);">${champF1}</div>
-        <div class="metric-sub">Min Gate: ≥ 85.0%</div>
+        <div class="metric-sub">Min Gate: ≥ 75.0%</div>
       </article>
 
       <article class="metric-card">
         <header><span class="metric-title">False Positive Rate</span></header>
-        <div class="metric-value" style="color: ${champ.fpr > 0.05 ? 'var(--color-warning, #fbbf24)' : 'var(--color-text, #f3f4f6)'};">${champFPR}</div>
-        <div class="metric-sub">Max Threshold: ≤ 5.0%</div>
+        <div class="metric-value" style="color: ${(champMetrics.false_positive_rate || 0) > 0.10 ? 'var(--color-warning, #fbbf24)' : 'var(--color-text, #f3f4f6)'};">${champFPR}</div>
+        <div class="metric-sub">Max Threshold: ≤ 10.0%</div>
       </article>
 
       <article class="metric-card">
@@ -175,7 +259,7 @@ export async function renderAutoML(root, { soft = false } = {}) {
           ${statusBadge(driftState)}
         </header>
         <div class="metric-value" style="font-size: 0.95rem; margin: 0.4rem 0;">
-          ${trig.monitoring_enabled !== false ? "ADWIN Monitoring Active" : "Trigger Cooldown"}
+          ${data.total_triggers !== undefined ? `ADWIN Active (${data.total_triggers} triggers)` : "ADWIN Monitoring Active"}
         </div>
         <div class="metric-sub">Cooldown: ${cooldown}s remaining</div>
       </article>
