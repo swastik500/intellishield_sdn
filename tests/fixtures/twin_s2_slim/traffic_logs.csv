@@ -1,0 +1,3 @@
+timestamp,traffic_type,source_host,destination_host,protocol,packet_rate,bandwidth,duration,status
+2026-07-28 10:00:05,ICMP_CONTINUOUS,h1,h2,ICMP,2.0,N/A,-1,RUNNING
+2026-07-28 10:00:25,SYN_FLOOD,h1,h2,TCP,10000.0,N/A,30,RUNNING

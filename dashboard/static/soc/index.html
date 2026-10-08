@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IntelliShield DDoS Dashboard</title>
+  <meta name="description" content="IntelliShield SDN DDoS detection, verification, mitigation monitoring, and lab control." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/soc/css/soc.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="DDoS Dashboard navigation">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">IS</div>
+        <div>
+          <h1>IntelliShield</h1>
+          <span>DDoS Dashboard</span>
+        </div>
+      </div>
+
+      <p class="section-title">OVERVIEW</p>
+      <a class="nav-item active" href="#dashboard"><span class="nav-icon">◆</span> Dashboard</a>
+      <a class="nav-item" href="#traffic"><span class="nav-icon">▣</span> Traffic Monitor</a>
+      <a class="nav-item" href="#topology"><span class="nav-icon">⬡</span> Network Topology</a>
+
+      <p class="section-title">DETECTION</p>
+      <a class="nav-item" href="#detection"><span class="nav-icon">◎</span> Detection Intelligence</a>
+      <a class="nav-item" href="#correlation"><span class="nav-icon">⇄</span> R4 Correlation</a>
+      <a class="nav-item" href="#fusion"><span class="nav-icon">⊕</span> Collaborative Fusion</a>
+      <a class="nav-item" href="#verification"><span class="nav-icon">✓</span> Verification</a>
+      <a class="nav-item" href="#adaptive"><span class="nav-icon">Δ</span> Adaptive RL / Drift</a>
+
+      <p class="section-title">RESPONSE</p>
+      <a class="nav-item" href="#mitigation"><span class="nav-icon">◼</span> Mitigation Status</a>
+      <a class="nav-item" href="#alerts"><span class="nav-icon">!</span> Security Alerts</a>
+      <a class="nav-item" href="#events"><span class="nav-icon">☰</span> Security Events</a>
+      <a class="nav-item" href="#rca"><span class="nav-icon">?</span> Root Cause / XAI</a>
+
+      <p class="section-title">RESEARCH / LAB</p>
+      <a class="nav-item" href="#twin"><span class="nav-icon">◌</span> Digital Twin <span class="nav-tag">SNAP</span></a>
+      <a class="nav-item" href="#lab-control"><span class="nav-icon">⚡</span> Lab Control <span class="nav-tag">WRITE</span></a>
+
+      <p class="section-title">OPERATIONS</p>
+      <a class="nav-item" href="#health"><span class="nav-icon">♥</span> System Health</a>
+      <a class="nav-item" href="#reports"><span class="nav-icon">▤</span> Reports</a>
+      <a class="nav-item" href="#commands"><span class="nav-icon">⌘</span> Command Center <span class="nav-tag">SAFE</span></a>
+      <a class="nav-item" href="#settings"><span class="nav-icon">⚙</span> Settings</a>
+
+      <div class="sidebar-bottom">
+        Primary UI. Legacy fallback:
+        <a href="/legacy">/legacy</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <button type="button" id="sidebar-toggle" aria-label="Toggle navigation">Menu</button>
+          <h2 id="topbar-title">Dashboard</h2>
+        </div>
+        <div class="topbar-actions">
+          <span class="observer-pill" id="mode-pill">DDoS DASHBOARD</span>
+          <button type="button" id="refresh-btn">Refresh</button>
+        </div>
+      </div>
+      <div id="page-root" aria-live="polite"></div>
+    </main>
+  </div>
+
+  <script type="module" src="/soc/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environments
+.venv/
+.venv-pptx/
+venv/
+env/
+
+# Secrets / local config
+.env
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursor/
+
+# Runtime logs (entire directory — regeneratable)
+logs/
+
+# Serialized models / pickles
+*.pkl
+*.joblib
+
+# DOCS folder (internal engineering notes, not shipped)
+DOCS/
+
+# Office / binary docs (keep in Google Drive, not git)
+*.docx
+*.pptx
+*.xlsx
+
+# Test / coverage caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Misc
+*.log
+*.bak
+*.tmp

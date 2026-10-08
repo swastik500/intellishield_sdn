@@ -1,0 +1,2 @@
+timestamp,action,status,src_mac,dst_mac
+2026-07-28 10:00:45,BLOCK,SUCCESS,00:00:00:00:00:01,00:00:00:00:00:02

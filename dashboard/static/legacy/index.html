@@ -1,0 +1,2077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IntelliShield SDN — Live Dashboard</title>
+  <meta name="description" content="Real-time DDoS detection and mitigation monitoring dashboard for IntelliShield SDN." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-deep:      #050a14;
+      --bg-card:      #0b1220;
+      --bg-card-2:    #101829;
+      --border:       rgba(30, 80, 160, 0.3);
+      --border-glow:  rgba(56, 152, 255, 0.5);
+      --neon-blue:    #38beff;
+      --neon-cyan:    #00e5ff;
+      --neon-green:   #00ff9d;
+      --neon-red:     #ff3d71;
+      --neon-orange:  #ff9500;
+      --neon-yellow:  #ffe600;
+      --text-primary: #e8f0fe;
+      --text-muted:   #6b82a8;
+      --text-dim:     #3a5070;
+      --font-mono:    'JetBrains Mono', monospace;
+      --font-ui:      'Inter', sans-serif;
+      --radius:       10px;
+      --radius-lg:    16px;
+      --transition:   0.25s ease;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-family: var(--font-ui);
+      font-size: 14px;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* Animated scanline overlay */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.04) 2px,
+        rgba(0,0,0,0.04) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────────── */
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 28px;
+      background: linear-gradient(90deg, #060d1e 0%, #0b1730 50%, #060d1e 100%);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 100;
+      backdrop-filter: blur(8px);
+    }
+
+    #header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .shield-icon {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, var(--neon-blue), var(--neon-cyan));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 0 18px rgba(56,190,255,0.4);
+      animation: pulse-icon 2.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse-icon {
+      0%, 100% { box-shadow: 0 0 18px rgba(56,190,255,0.4); }
+      50%       { box-shadow: 0 0 32px rgba(56,190,255,0.8); }
+    }
+
+    #header h1 {
+      font-size: 17px;
+      font-weight: 600;
+      background: linear-gradient(90deg, var(--neon-blue), var(--neon-cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: 0.3px;
+    }
+
+    #header-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+    #header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    #server-time {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--neon-cyan);
+      opacity: 0.8;
+    }
+
+    /* Controller live indicator */
+    #ctrl-status {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 12px; font-weight: 500;
+    }
+
+    .dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--neon-green);
+      box-shadow: 0 0 8px var(--neon-green);
+      animation: blink 1.4s ease-in-out infinite;
+    }
+
+    .dot.off { background: #ff3d71; box-shadow: 0 0 8px #ff3d71; animation: none; }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────────── */
+    #app { padding: 20px 24px; max-width: 1600px; margin: 0 auto; }
+
+    /* ── Stat Cards Row ──────────────────────────────────────────────── */
+    #stat-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 16px 14px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color var(--transition), transform var(--transition);
+      cursor: default;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--accent, var(--neon-blue));
+      opacity: 0.7;
+    }
+
+    .stat-card:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-2px);
+    }
+
+    .stat-icon { font-size: 22px; margin-bottom: 8px; }
+    .stat-value {
+      font-size: 26px; font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--accent, var(--neon-blue));
+      letter-spacing: -1px;
+    }
+    .stat-label { font-size: 11px; color: var(--text-muted); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* ── Info icon + popover ─────────────────────────────────────────── */
+    .info-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 3;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid rgba(107, 130, 168, 0.55);
+      background: rgba(11, 18, 32, 0.85);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color var(--transition), color var(--transition), background var(--transition);
+    }
+    .info-btn:hover,
+    .info-btn:focus-visible,
+    .info-btn.is-open {
+      border-color: var(--neon-cyan);
+      color: var(--neon-cyan);
+      background: rgba(0, 229, 255, 0.12);
+      outline: none;
+    }
+    .card-header { position: relative; }
+    .card-header .info-btn,
+    #control-header .info-btn,
+    #phase-strip-wrap .info-btn {
+      position: static;
+      margin-left: 8px;
+      flex-shrink: 0;
+    }
+    .card-header-left {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+    }
+    #phase-strip-wrap {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    #phase-strip-wrap #phase-strip { margin-bottom: 0; flex: 1; }
+    #control-header { position: relative; }
+    #control-header .info-btn { margin-right: 10px; }
+    #card-info-popover {
+      display: none;
+      position: fixed;
+      z-index: 9999;
+      width: min(320px, calc(100vw - 24px));
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 229, 255, 0.35);
+      background: #0d1524;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(56, 190, 255, 0.08);
+      color: var(--text);
+      pointer-events: auto;
+    }
+    #card-info-popover.open { display: block; }
+    #card-info-popover .cip-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--neon-cyan);
+      margin-bottom: 6px;
+    }
+    #card-info-popover .cip-body {
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--text-muted);
+    }
+    #card-info-popover .cip-novelty {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+      font-family: var(--font-mono);
+      letter-spacing: 0.3px;
+      color: var(--neon-blue);
+      text-transform: uppercase;
+    }
+
+    /* ── Phase Status Strip ──────────────────────────────────────────── */
+    #phase-strip {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .phase-pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      font-size: 11px; font-weight: 500;
+      transition: all var(--transition);
+    }
+
+    .phase-pill.active {
+      border-color: rgba(0, 255, 157, 0.4);
+      background: rgba(0, 255, 157, 0.06);
+      color: var(--neon-green);
+    }
+
+    .phase-pill.inactive {
+      border-color: rgba(255, 61, 113, 0.3);
+      background: rgba(255, 61, 113, 0.04);
+      color: var(--text-muted);
+    }
+
+    .phase-dot { width: 6px; height: 6px; border-radius: 50%; }
+    .phase-pill.active   .phase-dot { background: var(--neon-green); box-shadow: 0 0 6px var(--neon-green); }
+    .phase-pill.inactive .phase-dot { background: #ff3d71; }
+
+    /* ── Main Grid ───────────────────────────────────────────────────── */
+    #main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+      gap: 18px;
+    }
+
+    #bottom-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    /* ── Card ────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      transition: border-color var(--transition);
+    }
+
+    .card:hover { border-color: var(--border-glow); }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .card-title {
+      font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 1px;
+      color: var(--text-muted);
+      display: flex; align-items: center; gap: 7px;
+    }
+
+    .card-badge {
+      font-size: 10px; font-family: var(--font-mono);
+      padding: 2px 8px; border-radius: 10px;
+      background: rgba(56,190,255,0.1);
+      color: var(--neon-blue);
+      border: 1px solid rgba(56,190,255,0.25);
+    }
+
+    .card-body { padding: 16px 18px; }
+
+    /* ── Chart Wrappers ──────────────────────────────────────────────── */
+    .chart-wrap { position: relative; height: 200px; }
+
+    /* ── Entropy Gauge ───────────────────────────────────────────────── */
+    #entropy-gauge-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+      gap: 16px;
+    }
+
+    #gauge-canvas-wrap {
+      position: relative;
+      width: 180px; height: 180px;
+    }
+
+    #gauge-canvas { width: 180px; height: 180px; }
+
+    #gauge-center-text {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+
+    #gauge-score {
+      font-size: 32px; font-weight: 700;
+      font-family: var(--font-mono);
+      line-height: 1;
+    }
+
+    #gauge-label { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+    #gauge-status { font-size: 12px; font-weight: 600; margin-top: 4px; }
+
+    #entropy-bars { width: 100%; }
+
+    .ent-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 9px;
+    }
+
+    .ent-name { width: 80px; font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+
+    .ent-bar-bg {
+      flex: 1; height: 6px; border-radius: 3px;
+      background: rgba(255,255,255,0.07);
+      overflow: hidden;
+    }
+
+    .ent-bar-fill {
+      height: 100%; border-radius: 3px;
+      transition: width 0.6s ease;
+    }
+
+    .ent-val {
+      width: 36px; text-align: right;
+      font-size: 11px; font-family: var(--font-mono);
+      color: var(--text-muted);
+    }
+
+    /* ── Alert Feed ──────────────────────────────────────────────────── */
+    #alert-feed { max-height: 280px; overflow-y: auto; }
+    #alert-feed::-webkit-scrollbar { width: 4px; }
+    #alert-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    #security-alert-feed { max-height: 280px; overflow-y: auto; }
+    #security-alert-feed::-webkit-scrollbar { width: 4px; }
+    #security-alert-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .sev-CRITICAL { color: var(--neon-red); }
+    .sev-HIGH { color: var(--neon-orange); }
+    .sev-MEDIUM { color: var(--neon-yellow); }
+    .sev-LOW, .sev-INFO { color: var(--text-muted); }
+
+    .alert-row {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      animation: slide-in 0.3s ease;
+    }
+
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .alert-row:last-child { border-bottom: none; }
+
+    .alert-pill {
+      font-size: 9px; font-weight: 700; font-family: var(--font-mono);
+      padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
+      letter-spacing: 0.5px;
+    }
+
+    .pill-alert  { background: rgba(255,61,113,0.15);  color: #ff3d71; border: 1px solid rgba(255,61,113,0.3); }
+    .pill-normal { background: rgba(0,255,157,0.1);    color: #00ff9d; border: 1px solid rgba(0,255,157,0.25); }
+    .pill-drift  { background: rgba(255,149,0,0.12);   color: #ff9500; border: 1px solid rgba(255,149,0,0.3); }
+
+    .alert-info { flex: 1; }
+    .alert-type { font-size: 12px; font-weight: 500; }
+    .alert-meta { font-size: 10px; color: var(--text-muted); margin-top: 1px; font-family: var(--font-mono); }
+
+    .alert-conf {
+      font-size: 12px; font-weight: 600;
+      font-family: var(--font-mono);
+      color: var(--neon-red);
+      flex-shrink: 0;
+    }
+
+    /* ── Blocklist ───────────────────────────────────────────────────── */
+    #blocklist-table { width: 100%; border-collapse: collapse; }
+
+    #blocklist-table th {
+      text-align: left; padding: 0 8px 8px;
+      font-size: 10px; font-weight: 600; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: 0.7px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #blocklist-table td {
+      padding: 8px; font-size: 11px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+
+    #blocklist-table tr:last-child td { border-bottom: none; }
+    #blocklist-table tr:hover td { background: rgba(56,190,255,0.03); }
+
+    .mac-mono { font-family: var(--font-mono); font-size: 10px; color: var(--neon-blue); }
+    .hint-badge {
+      font-size: 9px; font-weight: 600;
+      padding: 2px 6px; border-radius: 4px;
+      background: rgba(255,61,113,0.12);
+      color: #ff3d71;
+    }
+
+    /* ── RL Thresholds panel ─────────────────────────────────────────── */
+    .rl-metric {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .rl-metric:last-child { border-bottom: none; }
+
+    .rl-name { font-size: 11px; color: var(--text-muted); }
+
+    .rl-value-wrap { display: flex; align-items: center; gap: 10px; }
+
+    .rl-bar-bg {
+      width: 90px; height: 5px; border-radius: 3px;
+      background: rgba(255,255,255,0.07);
+      overflow: hidden;
+    }
+
+    .rl-bar-fill {
+      height: 100%; border-radius: 3px;
+      background: linear-gradient(90deg, var(--neon-blue), var(--neon-cyan));
+      transition: width 0.6s ease;
+    }
+
+    .rl-val {
+      font-size: 12px; font-family: var(--font-mono);
+      color: var(--neon-cyan); font-weight: 500;
+      min-width: 60px; text-align: right;
+    }
+
+    .rl-reward {
+      font-size: 11px; font-family: var(--font-mono);
+      color: var(--neon-green); font-weight: 500;
+    }
+
+    .rl-reward.negative { color: var(--neon-red); }
+
+    /* ── Empty state ─────────────────────────────────────────────────── */
+    .empty-state {
+      text-align: center; padding: 32px 16px;
+      color: var(--text-dim); font-size: 12px;
+    }
+
+    .empty-state .icon { font-size: 28px; margin-bottom: 8px; opacity: 0.4; }
+
+    /* ── Refresh indicator ───────────────────────────────────────────── */
+    #refresh-bar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      height: 2px; background: var(--border);
+    }
+
+    #refresh-progress {
+      height: 100%;
+      background: linear-gradient(90deg, var(--neon-blue), var(--neon-cyan));
+      width: 0%;
+      transition: width linear;
+    }
+
+    /* ── Scrollbar global ────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── Master Control Panel ─────────────────────────────────────────── */
+    #control-panel {
+      margin: 0 20px 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+
+    #control-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 18px;
+      cursor: pointer;
+      user-select: none;
+      background: linear-gradient(90deg, rgba(56,190,255,0.08), transparent);
+    }
+
+    #control-header h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--neon-cyan);
+    }
+
+    #control-toggle { font-size: 12px; color: var(--text-muted); }
+
+    #control-body { padding: 14px 18px 18px; border-top: 1px solid var(--border); }
+
+    #control-body.collapsed { display: none; }
+
+    .control-section { margin-bottom: 16px; }
+
+    .control-section-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    .control-btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .ctrl-btn {
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-card-2);
+      color: var(--text-primary);
+      font-size: 12px;
+      font-family: var(--font-ui);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .ctrl-btn:hover:not(:disabled) {
+      border-color: var(--border-glow);
+      background: rgba(56,190,255,0.12);
+      color: var(--neon-cyan);
+    }
+
+    .ctrl-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .ctrl-btn.primary {
+      border-color: rgba(0,255,157,0.4);
+      color: var(--neon-green);
+    }
+
+    .ctrl-btn.danger {
+      border-color: rgba(255,61,113,0.4);
+      color: var(--neon-red);
+    }
+
+    .ctrl-btn.warn {
+      border-color: rgba(255,149,0,0.4);
+      color: var(--neon-orange);
+    }
+
+    #control-log {
+      margin-top: 12px;
+      background: #060a12;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--neon-green);
+      max-height: 160px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      line-height: 1.45;
+    }
+
+    #control-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header id="header">
+  <div id="header-left">
+    <div class="shield-icon">🛡️</div>
+    <div>
+      <h1>IntelliShield SDN</h1>
+      <div id="header-sub">Real-Time DDoS Detection &amp; Mitigation Dashboard</div>
+    </div>
+  </div>
+  <div id="header-right">
+    <div id="server-time">--:--:--</div>
+    <div id="ctrl-status">
+      <div class="dot off" id="ctrl-dot"></div>
+      <span id="ctrl-label">Connecting…</span>
+    </div>
+  </div>
+</header>
+
+<div id="app">
+
+  <!-- Stat Cards -->
+  <div id="stat-cards">
+    <div class="stat-card" style="--accent: var(--neon-red);">
+      <button type="button" class="info-btn" aria-label="About Total Attacks"
+        data-info-title="Total Attacks"
+        data-info-body="Running count of attack detections recorded by the live pipeline (entropy / ML signals that crossed into ATTACK)."
+        data-info-novelty="Baseline · Phases 2 + 4 (Detection)">i</button>
+      <div class="stat-icon">🚨</div>
+      <div class="stat-value" id="card-attacks">—</div>
+      <div class="stat-label">Total Attacks</div>
+    </div>
+    <div class="stat-card" style="--accent: var(--neon-orange);">
+      <button type="button" class="info-btn" aria-label="About Alerts Fired"
+        data-info-title="Alerts Fired"
+        data-info-body="Count of detection alerts written to entropy/ML alert logs. These are early warnings — not the same as R8 policy security alerts."
+        data-info-novelty="Baseline · Phase 2 (Entropy) / Phase 4 (ML)">i</button>
+      <div class="stat-icon">⚡</div>
+      <div class="stat-value" id="card-alerts">—</div>
+      <div class="stat-label">Alerts Fired</div>
+    </div>
+    <div class="stat-card" style="--accent: var(--neon-blue);">
+      <button type="button" class="info-btn" aria-label="About Flows Blocked"
+        data-info-title="Flows Blocked"
+        data-info-body="Active or recent OpenFlow DROP rules installed by mitigation. In Release 1.0 a block is only allowed after R7 verification returns VERIFIED."
+        data-info-novelty="Phase 5 (Mitigation) · gated by R7 Verification">i</button>
+      <div class="stat-icon">🚫</div>
+      <div class="stat-value" id="card-blocks">—</div>
+      <div class="stat-label">Flows Blocked</div>
+    </div>
+    <div class="stat-card" style="--accent: var(--neon-cyan);">
+      <button type="button" class="info-btn" aria-label="About Entropy Score"
+        data-info-title="Entropy Score"
+        data-info-body="Composite multi-dimensional Shannon entropy of live traffic. Floods collapse diversity → score drops → WARNING/ALERT."
+        data-info-novelty="Baseline · Phase 2 (Entropy Engine)">i</button>
+      <div class="stat-icon">📊</div>
+      <div class="stat-value" id="card-entropy">—</div>
+      <div class="stat-label">Entropy Score</div>
+    </div>
+    <div class="stat-card" style="--accent: var(--neon-green);">
+      <button type="button" class="info-btn" aria-label="About RL Packet Threshold"
+        data-info-title="RL Packet Threshold"
+        data-info-body="Current PPO-tuned packet-rate threshold used by mitigation gates. Lab ops profile can freeze the confidence gate for reproducible demos."
+        data-info-novelty="Phase 7 (PPO-RL) · Ops Profile (Foundation)">i</button>
+      <div class="stat-icon">🧠</div>
+      <div class="stat-value" id="card-pkt-thresh">—</div>
+      <div class="stat-label">RL Pkt Threshold</div>
+    </div>
+    <div class="stat-card" style="--accent: var(--neon-yellow);">
+      <button type="button" class="info-btn" aria-label="About Traffic Clusters"
+        data-info-title="Traffic Clusters"
+        data-info-body="Number of HDBSCAN traffic clusters from recent feature vectors. Used for profiling (NORMAL/ATTACK groups), not for DROP decisions."
+        data-info-novelty="Baseline · Phase 6 (ADWIN / HDBSCAN)">i</button>
+      <div class="stat-icon">🔗</div>
+      <div class="stat-value" id="card-clusters">—</div>
+      <div class="stat-label">Traffic Clusters</div>
+    </div>
+  </div>
+
+  <!-- Phase Status Pills -->
+  <div id="phase-strip-wrap">
+    <div id="phase-strip">
+      <div class="phase-pill inactive" id="pill-p1"><div class="phase-dot"></div>Phase 1: Flow Monitor</div>
+      <div class="phase-pill inactive" id="pill-p2"><div class="phase-dot"></div>Phase 2: Entropy</div>
+      <div class="phase-pill inactive" id="pill-p4"><div class="phase-dot"></div>Phase 4: ML Detection</div>
+      <div class="phase-pill inactive" id="pill-p5"><div class="phase-dot"></div>Phase 5: Mitigation</div>
+      <div class="phase-pill inactive" id="pill-p6"><div class="phase-dot"></div>Phase 6: ADWIN/HDBSCAN</div>
+      <div class="phase-pill inactive" id="pill-p7"><div class="phase-dot"></div>Phase 7: PPO-RL</div>
+    </div>
+    <button type="button" class="info-btn" aria-label="About phase status"
+      data-info-title="Phase Health Strip"
+      data-info-body="Shows which baseline pipeline phases are active on the controller this cycle. Release 1.0 novelty planes (R4–R8) run on top of these phases; R3 twin is separate and read-only."
+      data-info-novelty="Baseline Phases 1–7 · Foundation pipeline hub">i</button>
+  </div>
+
+  <!-- Master Control Panel -->
+  <div id="control-panel">
+    <div id="control-header" onclick="toggleControlPanel()">
+      <h2>🎛️ Master Control — Run Experiments from UI</h2>
+      <div style="display:flex; align-items:center;">
+        <button type="button" class="info-btn" aria-label="About Master Control"
+          onclick="event.stopPropagation()"
+          data-info-title="Master Control"
+          data-info-body="Operator panel to restart the controller, archive logs, run S1–S5 Mininet scenarios, compute IEEE metrics, and retrain ML. Requires sudoers (or sudo pass) for traffic scenarios."
+          data-info-novelty="Phase 3 (Traffic) · Phase 8 (Dashboard) · P0 evaluation / bundles">i</button>
+        <span id="control-toggle">▼ collapse</span>
+      </div>
+    </div>
+    <div id="control-body">
+      <div class="control-section">
+        <div class="control-section-title">Controller</div>
+        <div class="control-btns">
+          <button class="ctrl-btn primary" onclick="ctrlAction('controller/restart')">↻ Restart Controller</button>
+          <button class="ctrl-btn danger" onclick="ctrlAction('controller/stop')">⏹ Stop Controller</button>
+          <button class="ctrl-btn" onclick="ctrlAction('archive')">📦 Archive Logs</button>
+        </div>
+      </div>
+      <div class="control-section">
+        <div class="control-section-title">Attack Scenarios (requires sudo — see hint below)</div>
+        <div class="control-btns">
+          <button class="ctrl-btn" onclick="ctrlScenario('1')">S1 Normal</button>
+          <button class="ctrl-btn warn" onclick="ctrlScenario('2')">S2 SYN Flood</button>
+          <button class="ctrl-btn warn" onclick="ctrlScenario('3')">S3 UDP Flood</button>
+          <button class="ctrl-btn warn" onclick="ctrlScenario('4')">S4 Burst</button>
+          <button class="ctrl-btn warn" onclick="ctrlScenario('5')">S5 Mixed</button>
+          <button class="ctrl-btn primary" onclick="ctrlBatch()">▶ Run S3+S4+S5 (full eval)</button>
+        </div>
+      </div>
+      <div class="control-section">
+        <div class="control-section-title">ML &amp; Metrics</div>
+        <div class="control-btns">
+          <button class="ctrl-btn" onclick="ctrlAction('metrics')">📊 Compute Metrics</button>
+          <button class="ctrl-btn" onclick="ctrlAction('train')">🧠 Retrain ML Models</button>
+        </div>
+      </div>
+      <div id="control-log">Ready. Click a button to run a lab operation…</div>
+      <div id="control-hint">
+        Scenarios need root: on the VM run once —
+        <code>echo 'akshay ALL=(ALL) NOPASSWD: /usr/bin/python3 -m traffic_generator.traffic_scheduler *' | sudo tee /etc/sudoers.d/intellishield</code>
+        — or set <code>INTELLISHIELD_SUDO_PASS=123</code> before starting the dashboard.
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Grid: 2 columns -->
+  <div id="main-grid">
+
+    <!-- Traffic Chart -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">📈 Live Traffic — Packet &amp; Byte Rate</div>
+          <button type="button" class="info-btn" aria-label="About Live Traffic"
+            data-info-title="Live Traffic Chart"
+            data-info-body="Time series of aggregate packet and byte rates from OpenFlow flow/port stats. Gives operators a visual sense of floods vs baseline."
+            data-info-novelty="Baseline · Phase 1 (Flow Monitor)">i</button>
+        </div>
+        <div class="card-badge" id="traffic-badge">LIVE</div>
+      </div>
+      <div class="card-body">
+        <div class="chart-wrap">
+          <canvas id="traffic-chart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Entropy Gauge + Bars -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">🌀 Entropy Analysis</div>
+          <button type="button" class="info-btn" aria-label="About Entropy Analysis"
+            data-info-title="Entropy Analysis"
+            data-info-body="Five Shannon entropy dimensions (source, destination, packet, byte, flow) plus composite score. Collapse signals volumetric DDoS early."
+            data-info-novelty="Baseline · Phase 2 (Entropy Engine)">i</button>
+        </div>
+        <div class="card-badge" id="entropy-badge">NORMAL</div>
+      </div>
+      <div class="card-body" style="padding:0;">
+        <div id="entropy-gauge-wrap">
+          <div id="gauge-canvas-wrap">
+            <canvas id="gauge-canvas" width="180" height="180"></canvas>
+            <div id="gauge-center-text">
+              <div id="gauge-score" style="color: var(--neon-green);">1.00</div>
+              <div id="gauge-label">Entropy Score</div>
+              <div id="gauge-status" style="color: var(--neon-green);">NORMAL</div>
+            </div>
+          </div>
+          <div id="entropy-bars">
+            <div class="ent-row"><div class="ent-name">Source</div><div class="ent-bar-bg"><div class="ent-bar-fill" id="ebar-src" style="width:100%; background: var(--neon-blue);"></div></div><div class="ent-val" id="eval-src">1.00</div></div>
+            <div class="ent-row"><div class="ent-name">Destination</div><div class="ent-bar-bg"><div class="ent-bar-fill" id="ebar-dst" style="width:100%; background: var(--neon-cyan);"></div></div><div class="ent-val" id="eval-dst">1.00</div></div>
+            <div class="ent-row"><div class="ent-name">Packet Dist</div><div class="ent-bar-bg"><div class="ent-bar-fill" id="ebar-pkt" style="width:100%; background: var(--neon-green);"></div></div><div class="ent-val" id="eval-pkt">1.00</div></div>
+            <div class="ent-row"><div class="ent-name">Byte Dist</div><div class="ent-bar-bg"><div class="ent-bar-fill" id="ebar-byte" style="width:100%; background: var(--neon-orange);"></div></div><div class="ent-val" id="eval-byte">1.00</div></div>
+            <div class="ent-row"><div class="ent-name">Flow Dist</div><div class="ent-bar-bg"><div class="ent-bar-fill" id="ebar-flow" style="width:100%; background: var(--neon-yellow);"></div></div><div class="ent-val" id="eval-flow">1.00</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-grid -->
+
+  <!-- Bottom Grid: 3 columns -->
+  <div id="bottom-grid">
+
+    <!-- Alert Feed (legacy entropy CSV) -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">🚨 Detection Alerts</div>
+          <button type="button" class="info-btn" aria-label="About Detection Alerts"
+            data-info-title="Detection Alerts"
+            data-info-body="Feed of entropy/ML detection alerts from CSV logs. Fast early-warning channel before collaborative R4→R6→R7 gating."
+            data-info-novelty="Baseline · Phase 2 / Phase 4">i</button>
+        </div>
+        <div class="card-badge" id="alert-count-badge">0</div>
+      </div>
+      <div class="card-body" style="padding: 8px 14px;">
+        <div id="alert-feed">
+          <div class="empty-state"><div class="icon">🔍</div>No alerts yet — system monitoring…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- R8 Security Alerts (alerts.jsonl) -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">🛡️ Security Alerts (R8)</div>
+          <button type="button" class="info-btn" aria-label="About Security Alerts R8"
+            data-info-title="Security Alerts (R8)"
+            data-info-body="Policy-aware alerts from alerts.jsonl. Default policy emits only after verification (typically VERIFIED) — not every anomaly. Email/Slack channels are not implemented."
+            data-info-novelty="Novelty · R8 Automated Alerting">i</button>
+        </div>
+        <div class="card-badge" id="sec-alert-count-badge">0</div>
+      </div>
+      <div class="card-body" style="padding: 8px 14px;">
+        <div id="security-alert-feed">
+          <div class="empty-state"><div class="icon">🛡️</div>No verified security alerts yet…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- R5 RCA Evidence (root_cause_reports.jsonl) -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">🔎 Root Cause (R5)</div>
+          <button type="button" class="info-btn" aria-label="About Root Cause R5"
+            data-info-title="Root Cause Analysis (R5)"
+            data-info-body="Explainable RCA evidence chain after verification: contributing signals, fusion slice, and XAI path. Helps operators understand why a VERIFIED decision occurred."
+            data-info-novelty="Novelty · R5 XAI + RCA">i</button>
+        </div>
+        <div class="card-badge" id="rca-count-badge">0</div>
+      </div>
+      <div class="card-body" style="padding: 8px 14px;">
+        <div id="rca-detail" style="margin-bottom:10px; font-size:11px; color:var(--text-muted);">
+          Select a linked security alert or wait for RCA reports…
+        </div>
+        <div id="rca-feed">
+          <div class="empty-state"><div class="icon">🔎</div>No root-cause reports yet…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- R4 Cross-Layer Correlation (advisory) -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">🔗 Correlation (R4)</div>
+          <button type="button" class="info-btn" aria-label="About Correlation R4"
+            data-info-title="Cross-Layer Correlation (R4)"
+            data-info-body="Advisory co-occurrence score S·T·D·A·P across evidence categories for the same entity. Does not install OpenFlow rules — feeds fusion/RCA/dashboard only."
+            data-info-novelty="Novelty · R4 Multi-Signal Correlation (advisory)">i</button>
+        </div>
+        <div class="card-badge" id="corr-count-badge">0</div>
+      </div>
+      <div class="card-body" style="padding: 8px 14px;">
+        <div id="corr-detail" style="margin-bottom:10px; font-size:11px; color:var(--text-muted);">
+          Advisory co-occurrence evidence — not a final detector / not causation…
+        </div>
+        <div id="corr-feed">
+          <div class="empty-state"><div class="icon">🔗</div>No correlation results yet…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- R6 Collaborative Fusion -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">🧬 Fusion (R6)</div>
+          <button type="button" class="info-btn" aria-label="About Fusion R6"
+            data-info-title="Collaborative Fusion (R6)"
+            data-info-body="Reliability×health weighted fusion (w = ρ × h) into a signed decision S. Not majority vote. ATTACK/SUSPICIOUS here still requires R7 before DROP."
+            data-info-novelty="Novelty · R6 Collaborative Detection">i</button>
+        </div>
+        <div class="card-badge" id="fusion-count-badge">0</div>
+      </div>
+      <div class="card-body" style="padding: 8px 14px;">
+        <div id="fusion-detail" style="margin-bottom:10px; font-size:11px; color:var(--text-muted);">
+          Collaborative decisions — context ≠ attack; R7 still gates mitigation…
+        </div>
+        <div id="fusion-feed">
+          <div class="empty-state"><div class="icon">🧬</div>No fused decisions yet…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- R3 Digital Twin (read-only) -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">🪞 Digital Twin (R3)</div>
+          <button type="button" class="info-btn" aria-label="About Digital Twin R3"
+            data-info-title="Snapshot Digital Twin (R3)"
+            data-info-body="Read-only snapshot / replay / what-if of completed lab logs with fidelity summary. Does not launch Mininet, write OpenFlow, or act as a second controller. Level A observational twin — not a live OpenFlow replica."
+            data-info-novelty="Novelty · R3 Snapshot Twin (observational Level A)">i</button>
+        </div>
+        <div class="card-badge" id="twin-count-badge">0</div>
+      </div>
+      <div class="card-body" style="padding: 8px 14px;">
+        <div id="twin-detail" style="margin-bottom:10px; font-size:11px; color:var(--text-muted);">
+          READ-ONLY · click a SNAP row for fidelity detail · no attack / mitigate controls…
+        </div>
+        <div id="twin-fidelity-summary" style="margin-bottom:8px; font-size:11px; font-family:var(--font-mono); color:var(--text-muted);"></div>
+        <div id="twin-feed">
+          <div class="empty-state"><div class="icon">🪞</div>No twin runs yet…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Blocklist -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">🚫 Mitigation Blocks</div>
+          <button type="button" class="info-btn" aria-label="About Mitigation Blocks"
+            data-info-title="Mitigation Blocks"
+            data-info-body="Live table of surgical OpenFlow DROP rules (often FLOW_PAIR). Release 1.0 installs these only when R7 verification status is VERIFIED (fail-closed)."
+            data-info-novelty="Phase 5 · R7 Verification gate · P0.4 FLOW_PAIR">i</button>
+        </div>
+        <div class="card-badge" id="block-count-badge">0</div>
+      </div>
+      <div class="card-body" style="padding: 10px 14px;">
+        <table id="blocklist-table">
+          <thead>
+            <tr>
+              <th>Source MAC</th>
+              <th>Attack Type</th>
+              <th>Conf</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="blocklist-body">
+            <tr><td colspan="4">
+              <div class="empty-state"><div class="icon">✅</div>No active blocks</div>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- RL Thresholds -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-title">🧠 RL Adaptive Thresholds</div>
+          <button type="button" class="info-btn" aria-label="About RL Thresholds"
+            data-info-title="RL Adaptive Thresholds"
+            data-info-body="PPO-adjusted packet/byte/confidence gates with reward history. Lab ops profile freezes confidence near 60% so demos stay reproducible."
+            data-info-novelty="Phase 7 (PPO) · Ops Profile · P0.1 RL scale">i</button>
+        </div>
+        <div class="card-badge" id="rl-badge">PPO</div>
+      </div>
+      <div class="card-body">
+        <div class="rl-metric">
+          <div class="rl-name">Packet Rate Limit</div>
+          <div class="rl-value-wrap">
+            <div class="rl-bar-bg"><div class="rl-bar-fill" id="rl-bar-pkt" style="width:10%;"></div></div>
+            <div class="rl-val" id="rl-val-pkt">500 p/s</div>
+          </div>
+        </div>
+        <div class="rl-metric">
+          <div class="rl-name">Byte Rate Limit</div>
+          <div class="rl-value-wrap">
+            <div class="rl-bar-bg"><div class="rl-bar-fill" id="rl-bar-byte" style="width:10%;"></div></div>
+            <div class="rl-val" id="rl-val-byte">500K B/s</div>
+          </div>
+        </div>
+        <div class="rl-metric">
+          <div class="rl-name">Confidence Gate</div>
+          <div class="rl-value-wrap">
+            <div class="rl-bar-bg"><div class="rl-bar-fill" id="rl-bar-conf" style="width:80%;"></div></div>
+            <div class="rl-val" id="rl-val-conf">0.80</div>
+          </div>
+        </div>
+        <div class="rl-metric">
+          <div class="rl-name">Last Reward</div>
+          <div class="rl-value-wrap">
+            <div class="rl-reward" id="rl-reward">+0.0</div>
+          </div>
+        </div>
+        <div class="rl-metric">
+          <div class="rl-name">Last ML Label</div>
+          <div class="rl-value-wrap">
+            <div class="rl-val" id="rl-label">—</div>
+          </div>
+        </div>
+
+        <!-- Mini reward chart -->
+        <div style="margin-top:14px;">
+          <div style="font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Reward History</div>
+          <div class="chart-wrap" style="height:90px;">
+            <canvas id="reward-chart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /bottom-grid -->
+
+</div><!-- /app -->
+
+<!-- Shared card info popover (positioned by JS; avoids card overflow clipping) -->
+<div id="card-info-popover" role="dialog" aria-live="polite" aria-hidden="true">
+  <div class="cip-title" id="cip-title"></div>
+  <div class="cip-body" id="cip-body"></div>
+  <div class="cip-novelty" id="cip-novelty"></div>
+</div>
+
+<!-- Refresh progress bar -->
+<div id="refresh-bar"><div id="refresh-progress"></div></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  IntelliShield Dashboard — Frontend Logic
+// ═══════════════════════════════════════════════════════════════════
+
+const API      = '';   // same origin
+const INTERVAL = 5000; // refresh every 5 seconds
+
+// ── Chart.js Defaults ────────────────────────────────────────────
+Chart.defaults.color            = '#6b82a8';
+Chart.defaults.borderColor      = 'rgba(30,80,160,0.25)';
+Chart.defaults.font.family      = 'Inter, sans-serif';
+Chart.defaults.font.size        = 11;
+Chart.defaults.plugins.legend.display = false;
+
+// ── Traffic Chart ─────────────────────────────────────────────────
+const trafficCtx = document.getElementById('traffic-chart').getContext('2d');
+const trafficChart = new Chart(trafficCtx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      {
+        label: 'Packet Rate',
+        data: [],
+        borderColor: '#38beff',
+        backgroundColor: 'rgba(56,190,255,0.08)',
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: true,
+        tension: 0.4,
+        yAxisID: 'yPkt',
+      },
+      {
+        label: 'Byte Rate',
+        data: [],
+        borderColor: '#00e5ff',
+        backgroundColor: 'rgba(0,229,255,0.05)',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: true,
+        tension: 0.4,
+        yAxisID: 'yByte',
+        borderDash: [4,3],
+      },
+    ],
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 400 },
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: {
+        ticks: { maxTicksLimit: 6, maxRotation: 0,
+          callback: (_, i, arr) => {
+            const labels = trafficChart.data.labels;
+            const lbl = labels[i] || '';
+            return lbl.split(' ')[1] || lbl;  // show only time portion
+          }
+        },
+        grid: { color: 'rgba(30,80,160,0.12)' },
+      },
+      yPkt: {
+        position: 'left',
+        ticks: { callback: v => fmtRate(v, 'p') },
+        grid: { color: 'rgba(30,80,160,0.12)' },
+      },
+      yByte: {
+        position: 'right',
+        ticks: { callback: v => fmtRate(v, 'B') },
+        grid: { display: false },
+      },
+    },
+    plugins: {
+      tooltip: {
+        callbacks: {
+          label: ctx => `${ctx.dataset.label}: ${fmtRate(ctx.raw, ctx.datasetIndex === 0 ? 'p' : 'B')}`,
+        },
+      },
+    },
+  },
+});
+
+// ── Reward Chart ──────────────────────────────────────────────────
+const rewardCtx = document.getElementById('reward-chart').getContext('2d');
+const rewardChart = new Chart(rewardCtx, {
+  type: 'bar',
+  data: {
+    labels: [],
+    datasets: [{
+      data: [],
+      backgroundColor: ctx => ctx.raw >= 0 ? 'rgba(0,255,157,0.5)' : 'rgba(255,61,113,0.5)',
+      borderColor:     ctx => ctx.raw >= 0 ? '#00ff9d' : '#ff3d71',
+      borderWidth: 1,
+      borderRadius: 2,
+    }],
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 300 },
+    scales: {
+      x: { display: false },
+      y: {
+        grid: { color: 'rgba(30,80,160,0.12)' },
+        ticks: { maxTicksLimit: 3 },
+      },
+    },
+  },
+});
+
+// ── Gauge Canvas ──────────────────────────────────────────────────
+function drawGauge(score, status) {
+  const c   = document.getElementById('gauge-canvas');
+  const ctx = c.getContext('2d');
+  const cx  = c.width / 2, cy = c.height / 2;
+  const R   = 78, lineW = 14;
+
+  ctx.clearRect(0, 0, c.width, c.height);
+
+  // Background arc
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, Math.PI * 0.75, Math.PI * 2.25);
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth   = lineW;
+  ctx.lineCap     = 'round';
+  ctx.stroke();
+
+  // Score arc
+  const span  = 1.5 * Math.PI;
+  const end   = Math.PI * 0.75 + span * score;
+  const color = score > 0.6 ? '#00ff9d' : score > 0.35 ? '#ff9500' : '#ff3d71';
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, Math.PI * 0.75, end);
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = lineW;
+  ctx.lineCap     = 'round';
+  ctx.shadowBlur  = 18;
+  ctx.shadowColor = color;
+  ctx.stroke();
+  ctx.shadowBlur  = 0;
+
+  // Update center text
+  document.getElementById('gauge-score').textContent  = score.toFixed(2);
+  document.getElementById('gauge-score').style.color  = color;
+  document.getElementById('gauge-status').textContent = status;
+  document.getElementById('gauge-status').style.color = color;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+function fmtRate(v, unit) {
+  if (v >= 1e6) return (v/1e6).toFixed(1) + 'M' + unit + '/s';
+  if (v >= 1e3) return (v/1e3).toFixed(1) + 'K' + unit + '/s';
+  return v.toFixed(0) + ' ' + unit + '/s';
+}
+
+function fmtBytes(v) {
+  if (v >= 1e9) return (v/1e9).toFixed(1) + 'GB/s';
+  if (v >= 1e6) return (v/1e6).toFixed(1) + 'MB/s';
+  if (v >= 1e3) return (v/1e3).toFixed(1) + 'KB/s';
+  return v.toFixed(0) + ' B/s';
+}
+
+function shortTs(ts) {
+  return formatTsIst(ts);
+}
+
+// Convert IntelliShield timestamps (stored as UTC in logs/DTOs) into IST for UI.
+// Supported formats:
+// - ISO-8601 with timezone (e.g. "...Z" or "+00:00")
+// - Legacy CSV wall-clock (e.g. "YYYY-MM-DD HH:MM:SS"), interpreted as UTC.
+function formatTsIst(ts) {
+  if (!ts) return '—';
+  const s = String(ts).trim();
+  if (!s || s === '—') return '—';
+
+  const OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // IST = UTC + 05:30
+
+  // Only convert timestamps that clearly carry UTC semantics (ISO with Z/+00:00).
+  // For legacy "YYYY-MM-DD HH:MM:SS" IntelliShield uses `datetime.now()` (local wall clock),
+  // which on the lab VM is already IST.
+  if (s.includes('T') || s.endsWith('Z') || s.includes('+00:00')) {
+    const ms = new Date(s).getTime();
+    if (Number.isFinite(ms)) {
+      return new Date(ms + OFFSET_MS).toISOString().slice(11, 19); // HH:MM:SS
+    }
+  }
+
+  // Legacy wall-clock: return HH:MM:SS part unchanged.
+  const parts = s.split(' ');
+  if (parts.length > 1) return parts[1];
+
+  return s; // fallback
+}
+
+function truncateLabel(ts) {
+  // show HH:MM:SS only (IST)
+  return formatTsIst(ts);
+}
+
+async function fetchJSON(path) {
+  try {
+    const r = await fetch(API + path);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+// ── Render Functions ──────────────────────────────────────────────
+
+function renderStatus(d) {
+  if (!d) return;
+  const ctrl = d.controller_running;
+  document.getElementById('ctrl-dot').className   = 'dot' + (ctrl ? '' : ' off');
+  document.getElementById('ctrl-label').textContent = ctrl ? 'Controller Live' : 'Controller Offline';
+  document.getElementById('server-time').textContent = d.server_time || '';
+
+  const pills = {
+    'pill-p1': d.phase1_flow_monitor,
+    'pill-p2': d.phase2_entropy,
+    'pill-p4': d.phase4_ml,
+    'pill-p5': d.phase5_mitigation,
+    'pill-p6': d.phase6_adwin,
+    'pill-p7': d.phase7_rl,
+  };
+  for (const [id, active] of Object.entries(pills)) {
+    const el = document.getElementById(id);
+    if (el) el.className = 'phase-pill ' + (active ? 'active' : 'inactive');
+  }
+}
+
+function renderSummary(d) {
+  if (!d) return;
+  setText('card-attacks',    d.total_attacks  ?? '—');
+  setText('card-alerts',     d.total_alerts   ?? '—');
+  setText('card-blocks',     d.total_blocks   ?? '—');
+  setText('card-entropy',    typeof d.entropy_score === 'number' ? d.entropy_score.toFixed(2) : '—');
+  setText('card-pkt-thresh', typeof d.pkt_threshold === 'number' ? Math.round(d.pkt_threshold) + '/s' : '—');
+  setText('card-clusters',   d.cluster_count  ?? '—');
+}
+
+function renderTraffic(d) {
+  if (!d || !d.points.length) return;
+  const pts    = d.points;
+  const labels = pts.map(p => truncateLabel(p.timestamp));
+  const pkts   = pts.map(p => p.packet_rate);
+  const bytes  = pts.map(p => p.byte_rate);
+
+  trafficChart.data.labels        = labels;
+  trafficChart.data.datasets[0].data = pkts;
+  trafficChart.data.datasets[1].data = bytes;
+  trafficChart.update('none');
+}
+
+function renderEntropy(d) {
+  if (!d || !d.latest) return;
+  const l = d.latest;
+  const score  = parseFloat(l.entropy_score || 1);
+  const status = l.status || 'NORMAL';
+
+  drawGauge(score, status);
+
+  const badge = document.getElementById('entropy-badge');
+  badge.textContent = status;
+  badge.style.color = status === 'ALERT' ? 'var(--neon-red)' : 'var(--neon-green)';
+  badge.style.borderColor = status === 'ALERT' ? 'rgba(255,61,113,0.3)' : 'rgba(0,255,157,0.25)';
+
+  setBar('ebar-src',  'eval-src',  l.src_entropy);
+  setBar('ebar-dst',  'eval-dst',  l.dst_entropy);
+  setBar('ebar-pkt',  'eval-pkt',  l.packet_entropy);
+  setBar('ebar-byte', 'eval-byte', l.byte_entropy);
+  setBar('ebar-flow', 'eval-flow', l.flow_entropy);
+}
+
+function setBar(barId, valId, raw) {
+  const v   = parseFloat(raw ?? 1);
+  const pct = (Math.max(0, Math.min(1, v)) * 100).toFixed(1) + '%';
+  const el  = document.getElementById(barId);
+  if (el) el.style.width = pct;
+  const ve  = document.getElementById(valId);
+  if (ve) ve.textContent = v.toFixed(2);
+}
+
+function renderAlerts(d) {
+  if (!d) return;
+  const feed = document.getElementById('alert-feed');
+  const alerts = d.alerts || [];
+
+  document.getElementById('alert-count-badge').textContent = alerts.length;
+
+  if (!alerts.length) {
+    feed.innerHTML = '<div class="empty-state"><div class="icon">🔍</div>No alerts yet — system monitoring…</div>';
+    return;
+  }
+
+  feed.innerHTML = alerts.slice(0, 15).map(a => {
+    const isAlert = a.status === 'ALERT';
+    const pill  = isAlert ? 'pill-alert' : 'pill-normal';
+    const label = isAlert ? '⚠ ALERT' : '✓ OK';
+    const type  = (a.alert_type || 'ENTROPY').replace(/_/g, ' ');
+    const conf  = parseFloat(a.confidence || 0).toFixed(1) + '%';
+    return `
+    <div class="alert-row">
+      <div class="alert-pill ${pill}">${label}</div>
+      <div class="alert-info">
+        <div class="alert-type">${type}</div>
+        <div class="alert-meta">${a.dimension || '—'} · Switch ${a.switch_id} · ${shortTs(a.timestamp)}</div>
+      </div>
+      <div class="alert-conf" style="color:${isAlert ? 'var(--neon-red)' : 'var(--neon-green)'};">${conf}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderSecurityAlerts(d) {
+  const feed = document.getElementById('security-alert-feed');
+  const badge = document.getElementById('sec-alert-count-badge');
+  if (!feed) return;
+  const alerts = (d && d.alerts) || [];
+  if (badge) badge.textContent = alerts.length;
+
+  if (!alerts.length) {
+    feed.innerHTML = '<div class="empty-state"><div class="icon">🛡️</div>No verified security alerts yet…</div>';
+    return;
+  }
+
+  feed.innerHTML = alerts.slice(0, 15).map(a => {
+    const sev = a.severity || 'INFO';
+    const type = (a.alert_type || 'DETECTION').replace(/_/g, ' ');
+    const attacker = a.attacker_mac || '—';
+    const linked = a.rca_status === 'linked' && a.rca_report_id;
+    const rca = linked ? String(a.rca_report_id).slice(0, 8) : 'absent';
+    const corrLinked = a.correlation_status === 'linked' && a.correlation_id;
+    const corr = corrLinked ? String(a.correlation_id).slice(0, 8) : 'absent';
+    const score = a.correlation_score != null ? Number(a.correlation_score).toFixed(2) : '—';
+    const mit = a.mitigation_status || '—';
+    const eid = a.event_id || a.verification_id || '—';
+    const rid = linked ? String(a.rca_report_id) : '';
+    const cid = corrLinked ? String(a.correlation_id) : '';
+    const click = linked
+      ? `onclick="loadRcaDetail('${rid.replace(/'/g, '')}')" style="cursor:pointer;"`
+      : (corrLinked
+        ? `onclick="loadCorrDetail('${cid.replace(/'/g, '')}')" style="cursor:pointer;"`
+        : '');
+    return `
+    <div class="alert-row" ${click} title="${linked ? 'Open RCA evidence' : (corrLinked ? 'Open correlation evidence' : '')}">
+      <div class="alert-pill pill-alert sev-${sev}">${sev}</div>
+      <div class="alert-info">
+        <div class="alert-type">${type} · ${a.title || ''}</div>
+        <div class="alert-meta">${shortTs(a.timestamp)} · src ${attacker}
+          · evt ${String(eid).slice(0, 8)} · mit ${mit} · RCA ${rca} · CORR ${corr} (${score})</div>
+        <div class="alert-meta">${(a.message || '').slice(0, 120)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _kindLabel(kind) {
+  const k = String(kind || 'UNKNOWN').toUpperCase();
+  if (k === 'OBSERVED') return '<span style="color:var(--neon-green);">Observed</span>';
+  if (k === 'INFERRED') return '<span style="color:#e6b800;">Inferred</span>';
+  if (k === 'NOT_AVAILABLE') return '<span style="color:var(--text-dim);">Unavailable</span>';
+  return '<span style="color:var(--text-dim);">Unknown</span>';
+}
+
+function renderRcaReport(r) {
+  if (!r) {
+    return '<div class="empty-state"><div class="icon">🔎</div>RCA unavailable</div>';
+  }
+  const conf = r.rca_confidence != null ? Number(r.rca_confidence).toFixed(2) : 'UNAVAILABLE';
+  const eligible = r.mitigation_eligible === true
+    ? 'True'
+    : (r.mitigation_eligible === false ? 'False' : 'UNAVAILABLE');
+  const gaps = (r.missing_evidence || []).slice(0, 6).join(', ') || 'none listed';
+  const path = (r.decision_evidence || []).slice(0, 6).map(x => `<li>${x}</li>`).join('')
+    || '<li>UNAVAILABLE</li>';
+  const items = (r.evidence_items || []).slice(0, 8).map(it =>
+    `<div class="alert-meta">${_kindLabel(it.kind)} · ${it.key}: ${(it.statement || '').slice(0, 110)}</div>`
+  ).join('') || '<div class="alert-meta">Unavailable</div>';
+
+  return `
+    <div style="font-family:var(--font-mono); font-size:11px; line-height:1.45;">
+      <div><b>Prediction</b>: ${r.prediction || 'UNAVAILABLE'}</div>
+      <div><b>RCA confidence</b>: ${conf} <span style="color:var(--text-dim);">(evidence completeness)</span></div>
+      <div><b>Verification</b>: ${r.verification_status || 'UNAVAILABLE'}</div>
+      <div><b>Suspected source</b>: ${r.suspected_source || 'UNAVAILABLE'}</div>
+      <div><b>Affected target</b>: ${r.affected_target || 'UNAVAILABLE'}</div>
+      <div><b>Attack hint</b>: ${r.attack_hint || 'UNAVAILABLE'}</div>
+      <div><b>Mitigation eligible</b>: ${eligible} · strategy ${r.mitigation_strategy || 'UNAVAILABLE'}</div>
+      <div style="margin-top:6px;"><b>Decision evidence</b> (from XAI artifacts):</div>
+      <ul style="margin:4px 0 6px 16px; padding:0;">${path}</ul>
+      <div><b>Evidence gaps</b>: ${gaps}</div>
+      <div style="margin-top:6px; color:var(--text-dim);">${(r.summary || '').slice(0, 220)}</div>
+      <div style="margin-top:8px;"><b>Tagged evidence</b></div>
+      ${items}
+    </div>`;
+}
+
+async function loadRcaDetail(reportId) {
+  const detail = document.getElementById('rca-detail');
+  if (!detail || !reportId) return;
+  detail.textContent = 'Loading RCA…';
+  const r = await fetchJSON('/api/root-cause-reports/' + encodeURIComponent(reportId));
+  if (!r || r.error || !r.report_id) {
+    detail.innerHTML = '<span style="color:var(--neon-red);">RCA report not found / unavailable</span>';
+    return;
+  }
+  detail.innerHTML = renderRcaReport(r);
+}
+
+function renderRcaFeed(d) {
+  const feed = document.getElementById('rca-feed');
+  const badge = document.getElementById('rca-count-badge');
+  if (!feed) return;
+  const reports = (d && d.reports) || [];
+  if (badge) badge.textContent = reports.length;
+  if (!reports.length) {
+    feed.innerHTML = '<div class="empty-state"><div class="icon">🔎</div>No root-cause reports yet…</div>';
+    return;
+  }
+  feed.innerHTML = reports.slice(0, 8).map(r => {
+    const rid = String(r.report_id || '');
+    const src = r.suspected_source || 'UNAVAILABLE';
+    const hint = r.attack_hint || 'UNAVAILABLE';
+    const conf = r.rca_confidence != null ? Number(r.rca_confidence).toFixed(2) : '—';
+    return `
+    <div class="alert-row" onclick="loadRcaDetail('${rid.replace(/'/g, '')}')" style="cursor:pointer;">
+      <div class="alert-pill pill-alert">RCA</div>
+      <div class="alert-info">
+        <div class="alert-type">${hint} · conf ${conf}</div>
+        <div class="alert-meta">${shortTs(r.timestamp)} · src ${src}
+          · id ${rid.slice(0, 8)} · evt ${String(r.event_id || '').slice(0, 8)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderCorrResult(r) {
+  if (!r) {
+    return '<div class="empty-state"><div class="icon">🔗</div>Correlation unavailable</div>';
+  }
+  const score = r.score != null ? Number(r.score).toFixed(4) : 'UNAVAILABLE';
+  const cats = (r.participating_categories || []).join(', ') || 'none';
+  const entity = r.entity_key || 'UNAVAILABLE';
+  return `
+    <div style="font-family:var(--font-mono); font-size:11px; line-height:1.45;">
+      <div><strong>Score</strong> ${score} · <strong>Status</strong> ${r.status || '—'}</div>
+      <div><strong>Categories</strong> ${cats}</div>
+      <div><strong>Entity</strong> ${entity}</div>
+      <div><strong>Signals</strong> ${r.signal_count != null ? r.signal_count : '—'}</div>
+      <div><strong>Window</strong> ${r.window_start || '—'} → ${r.window_end || '—'}</div>
+      <div><strong>Event</strong> ${r.event_id || 'UNAVAILABLE'}</div>
+      <div style="margin-top:6px;">${(r.summary || '').slice(0, 220)}</div>
+      <div class="alert-meta" style="margin-top:6px;">${r.note || 'Co-occurrence only — not causation.'}</div>
+    </div>`;
+}
+
+async function loadCorrDetail(correlationId) {
+  const detail = document.getElementById('corr-detail');
+  if (!detail || !correlationId) return;
+  detail.textContent = 'Loading correlation…';
+  const r = await fetchJSON('/api/correlation-results/' + encodeURIComponent(correlationId));
+  if (!r || r.error || !r.correlation_id) {
+    detail.innerHTML = '<span style="color:var(--neon-red);">Correlation result not found / unavailable</span>';
+    return;
+  }
+  detail.innerHTML = renderCorrResult(r);
+}
+
+function renderCorrFeed(d) {
+  const feed = document.getElementById('corr-feed');
+  const badge = document.getElementById('corr-count-badge');
+  if (!feed) return;
+  const results = (d && d.results) || [];
+  if (badge) badge.textContent = results.length;
+  if (!results.length) {
+    feed.innerHTML = '<div class="empty-state"><div class="icon">🔗</div>No correlation results yet…</div>';
+    return;
+  }
+  feed.innerHTML = results.slice(0, 8).map(r => {
+    const cid = String(r.correlation_id || '');
+    const score = r.score != null ? Number(r.score).toFixed(3) : '—';
+    const cats = (r.participating_categories || []).slice(0, 4).join(', ') || 'none';
+    return `
+    <div class="alert-row" onclick="loadCorrDetail('${cid.replace(/'/g, '')}')" style="cursor:pointer;">
+      <div class="alert-pill pill-alert">CORR</div>
+      <div class="alert-info">
+        <div class="alert-type">score ${score} · ${r.status || '—'}</div>
+        <div class="alert-meta">${shortTs(r.timestamp)} · ${cats}
+          · id ${cid.slice(0, 8)} · sigs ${r.signal_count != null ? r.signal_count : '—'}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderFusionResult(r) {
+  if (!r) {
+    return '<div class="empty-state"><div class="icon">🧬</div>Fusion unavailable</div>';
+  }
+  const conf = r.confidence != null ? Number(r.confidence).toFixed(4) : 'UNAVAILABLE';
+  const parts = (r.participating || []).join(', ') || 'none';
+  const votes = (r.primary_votes || []).map(v =>
+    `${v.detector}:${v.decision}@${v.confidence != null ? Number(v.confidence).toFixed(2) : '—'}/${v.health || '?'}`
+  ).join(' · ') || '—';
+  const r4 = r.r4_support || {};
+  const ctx = (r.context_indicators || []).join(', ') || 'none';
+  return `
+    <div style="font-family:var(--font-mono); font-size:11px; line-height:1.45;">
+      <div><strong>Decision</strong> ${r.decision || '—'} · <strong>Conf</strong> ${conf}</div>
+      <div><strong>Agreement</strong> ${r.disagreement ? 'DISAGREE' : 'AGREE'}</div>
+      <div><strong>Primary</strong> ${parts}</div>
+      <div><strong>Votes</strong> ${votes}</div>
+      <div><strong>Health miss/deg</strong> ${(r.missing_detectors||[]).join(',')||'—'} / ${(r.degraded_detectors||[]).join(',')||'—'}</div>
+      <div><strong>R4 support</strong> ${r4.present ? `yes (boost=${r4.boost_applied})` : 'no'}</div>
+      <div><strong>Context</strong> ${ctx} <span style="opacity:.75">${r.context_note || ''}</span></div>
+      <div><strong>Entity</strong> ${r.entity_key || 'UNAVAILABLE'}</div>
+      <div><strong>Verify</strong> ${r.verification_id || '—'}</div>
+      <div class="alert-meta" style="margin-top:6px;">${r.note || 'Collaborative fusion — R7 gates mitigation.'}</div>
+    </div>`;
+}
+
+async function loadFusionDetail(fusionId) {
+  const detail = document.getElementById('fusion-detail');
+  if (!detail || !fusionId) return;
+  detail.textContent = 'Loading fusion…';
+  const r = await fetchJSON('/api/fused-decisions/' + encodeURIComponent(fusionId));
+  if (!r || r.error || !r.fusion_id) {
+    detail.innerHTML = '<span style="color:var(--neon-red);">Fused decision not found / unavailable</span>';
+    return;
+  }
+  detail.innerHTML = renderFusionResult(r);
+}
+
+function renderFusionFeed(d) {
+  const feed = document.getElementById('fusion-feed');
+  const badge = document.getElementById('fusion-count-badge');
+  if (!feed) return;
+  const results = (d && d.results) || [];
+  if (badge) badge.textContent = results.length;
+  if (!results.length) {
+    feed.innerHTML = '<div class="empty-state"><div class="icon">🧬</div>No fused decisions yet…</div>';
+    return;
+  }
+  feed.innerHTML = results.slice(0, 8).map(r => {
+    const fid = String(r.fusion_id || '');
+    const conf = r.confidence != null ? Number(r.confidence).toFixed(2) : '—';
+    const parts = (r.participating || []).slice(0, 3).join('+') || '—';
+    const agree = r.disagreement ? 'DISAGREE' : 'AGREE';
+    return `
+    <div class="alert-row" onclick="loadFusionDetail('${fid.replace(/'/g, '')}')" style="cursor:pointer;">
+      <div class="alert-pill pill-alert">FUSE</div>
+      <div class="alert-info">
+        <div class="alert-type">${r.decision || '—'} @ ${conf} · ${agree}</div>
+        <div class="alert-meta">${shortTs(r.timestamp)} · ${parts}
+          · id ${fid.slice(0, 8)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadTwinDetail(runId) {
+  const detail = document.getElementById('twin-detail');
+  if (!detail || !runId) return;
+  const r = await fetchJSON('/api/digital-twin/runs/' + encodeURIComponent(runId));
+  if (!r || r.detail) {
+    detail.innerHTML = '<span style="color:var(--neon-red);">Twin run not found / unavailable</span>';
+    return;
+  }
+  const m = r.metrics || {};
+  detail.innerHTML = [
+    `<b>${r.profile_id || '—'}</b> v${r.profile_version || '?'}`,
+    `fp ${(r.profile_fingerprint || '').slice(0, 12)}…`,
+    `seed ${r.seed ?? '—'}`,
+    `scenarios ${(r.scenario_ids || []).join(',') || '—'}`,
+    `cand ${r.candidate_id || '—'}`,
+    `val ${r.validation_status || '—'} / ${r.outcome_code || '—'}`,
+    `F1 ${m.f1_score != null ? Number(m.f1_score).toFixed(2) : '—'}`,
+    `READ-ONLY`,
+  ].join(' · ');
+}
+
+async function loadTwinSnapshotDetail(snapshotId) {
+  const detail = document.getElementById('twin-detail');
+  if (!detail || !snapshotId) return;
+  const r = await fetchJSON('/api/digital-twin/snapshots/' + encodeURIComponent(snapshotId));
+  if (!r || r.detail) {
+    detail.innerHTML = '<span style="color:var(--neon-red);">Twin snapshot not found / unavailable</span>';
+    return;
+  }
+  const fid = r.fidelity || {};
+  const sum = fid.summary || {};
+  const pkg = r.package || {};
+  detail.innerHTML = [
+    `<b>${r.snapshot_id || snapshotId}</b>`,
+    `overall ${fid.overall || '—'}`,
+    `PASS ${sum.PASS ?? '—'} / FAIL ${sum.FAIL ?? '—'} / N/A ${sum.NOT_AVAILABLE ?? '—'}`,
+    `windows ${(r.windows || []).length}`,
+    `pkg snap=${pkg['twin_snapshot.json'] ? 'Y' : 'N'} obs=${pkg['twin_observation.json'] ? 'Y' : 'N'} fid=${pkg['fidelity_report.json'] ? 'Y' : 'N'}`,
+    `READ-ONLY · no Mininet launch`,
+  ].join(' · ');
+}
+
+function _twinFidLabel(s) {
+  const fid = s && s.fidelity;
+  if (!fid) return 'FID —';
+  const sum = fid.summary || {};
+  return `${fid.overall || '—'} · P${sum.PASS ?? 0}/F${sum.FAIL ?? 0}/N${sum.NOT_AVAILABLE ?? 0}`;
+}
+
+function renderTwinFeed(d, snaps, replays) {
+  const feed = document.getElementById('twin-feed');
+  const badge = document.getElementById('twin-count-badge');
+  const fidSum = document.getElementById('twin-fidelity-summary');
+  if (!feed) return;
+  const runs = (d && d.runs) || [];
+  const snapshots = (snaps && snaps.snapshots) || [];
+  const replayRows = (replays && replays.replays) || [];
+  if (badge) badge.textContent = runs.length + snapshots.length + replayRows.length;
+
+  if (fidSum) {
+    const latest = snapshots.find(s => s.fidelity) || snapshots[0];
+    if (latest && latest.fidelity) {
+      const f = latest.fidelity;
+      const sum = f.summary || {};
+      fidSum.textContent = `Latest fidelity: ${f.overall || '—'} · PASS=${sum.PASS ?? 0} FAIL=${sum.FAIL ?? 0} N/A=${sum.NOT_AVAILABLE ?? 0} · ${(latest.snapshot_id || '').slice(0, 14)}`;
+    } else {
+      fidSum.textContent = snapshots.length
+        ? 'Fidelity summary not attached on listed snapshots yet (run Level A ingest).'
+        : '';
+    }
+  }
+
+  if (!runs.length && !snapshots.length && !replayRows.length) {
+    feed.innerHTML = '<div class="empty-state"><div class="icon">🪞</div>No twin runs yet…</div>';
+    return;
+  }
+  const snapHtml = snapshots.slice(0, 4).map(s => {
+    const sid = String(s.snapshot_id || '');
+    const nw = s.n_windows != null ? s.n_windows : '—';
+    const safe = sid.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `
+    <div class="alert-row" onclick="loadTwinSnapshotDetail('${safe}')" style="cursor:pointer;">
+      <div class="alert-pill pill-alert">SNAP</div>
+      <div class="alert-info">
+        <div class="alert-type">READ-ONLY · ${_twinFidLabel(s)} · windows ${nw}</div>
+        <div class="alert-meta">${s.profile_id || '—'} · id ${sid.slice(0, 12)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const replayHtml = replayRows.slice(0, 3).map(r => {
+    const rid = String(r.replay_id || '');
+    const ok = r.sequence_ok === true ? 'SEQ_OK' : (r.sequence_ok === false ? 'SEQ_FAIL' : 'SEQ—');
+    const scen = r.scenario_id || '—';
+    return `
+    <div class="alert-row">
+      <div class="alert-pill pill-alert">REPLAY</div>
+      <div class="alert-info">
+        <div class="alert-type">${ok} · ${scen} · err ${r.temporal_error != null ? r.temporal_error : '—'}</div>
+        <div class="alert-meta">snap ${(r.snapshot_id || '—').toString().slice(0, 12)} · id ${rid.slice(0, 12)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const runHtml = runs.slice(0, 3).map(r => {
+    const rid = String(r.run_id || '');
+    const val = r.validation_status || r.status || '—';
+    const scen = (r.scenario_ids || []).slice(0, 3).join(',') || '—';
+    return `
+    <div class="alert-row" onclick="loadTwinDetail('${rid.replace(/'/g, '')}')" style="cursor:pointer;">
+      <div class="alert-pill pill-alert">TWIN</div>
+      <div class="alert-info">
+        <div class="alert-type">${val} · ${r.outcome_code || '—'} · seed ${r.seed ?? '—'}</div>
+        <div class="alert-meta">${r.profile_id || '—'} · ${scen}
+          · cand ${(r.candidate_id || '—').toString().slice(0, 10)}
+          · id ${rid.slice(0, 10)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  feed.innerHTML = snapHtml + replayHtml + runHtml;
+}
+
+function renderBlocklist(d) {
+  if (!d) return;
+  const blocks = d.blocks || [];
+  const tbody  = document.getElementById('blocklist-body');
+  document.getElementById('block-count-badge').textContent = blocks.length;
+
+  if (!blocks.length) {
+    tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="icon">✅</div>No blocks recorded</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = blocks.slice(0, 10).map(b => {
+    const mac  = b.src_mac || '—';
+    const hint = (b.attack_hint || '—').replace(/_/g, ' ');
+    const conf = parseFloat(b.confidence || 0).toFixed(1) + '%';
+    const ts   = shortTs(b.timestamp);
+    return `<tr>
+      <td><span class="mac-mono">${mac}</span></td>
+      <td><span class="hint-badge">${hint}</span></td>
+      <td style="color:var(--neon-red); font-family:var(--font-mono);">${conf}</td>
+      <td style="color:var(--text-muted); font-family:var(--font-mono); font-size:10px;">${ts}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderRL(d) {
+  if (!d || !d.latest) return;
+  const l = d.latest;
+
+  const pkt  = parseFloat(l.pkt_threshold  || 500);
+  const byte = parseFloat(l.byte_threshold || 500000);
+  const conf = parseFloat(l.conf_threshold || 0.80);
+  const rew  = parseFloat(l.reward || 0);
+
+  const pct  = v => Math.min(100, v).toFixed(1) + '%';
+
+  // Bars: pkt normalised to 5000 max, byte to 5000000 max
+  document.getElementById('rl-bar-pkt').style.width  = pct((pkt / 5000) * 100);
+  document.getElementById('rl-bar-byte').style.width = pct((byte / 5000000) * 100);
+  document.getElementById('rl-bar-conf').style.width = pct(conf * 100);
+
+  document.getElementById('rl-val-pkt').textContent  = Math.round(pkt) + ' p/s';
+  document.getElementById('rl-val-byte').textContent = fmtBytes(byte);
+  document.getElementById('rl-val-conf').textContent = conf.toFixed(2);
+
+  const rewEl = document.getElementById('rl-reward');
+  rewEl.textContent = (rew >= 0 ? '+' : '') + rew.toFixed(1);
+  rewEl.className   = 'rl-reward' + (rew < 0 ? ' negative' : '');
+
+  document.getElementById('rl-label').textContent = l.ml_label || '—';
+
+  // Reward history chart
+  const pts = (d.points || []).slice(-30);
+  rewardChart.data.labels        = pts.map((_, i) => i);
+  rewardChart.data.datasets[0].data = pts.map(p => parseFloat(p.reward || 0));
+  rewardChart.update('none');
+}
+
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+// ── Refresh Progress Bar ──────────────────────────────────────────
+let _barAnim = null;
+
+function startProgressBar() {
+  const bar = document.getElementById('refresh-progress');
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  requestAnimationFrame(() => {
+    bar.style.transition = `width ${INTERVAL}ms linear`;
+    bar.style.width = '100%';
+  });
+}
+
+// ── Main Refresh Loop ─────────────────────────────────────────────
+async function refresh() {
+  startProgressBar();
+
+  const [status, summary, traffic, entropy, alerts, secAlerts, rcaReports, corrResults, fusionResults, twinRuns, twinSnaps, twinReplays, blocklist, rl, ml] = await Promise.all([
+    fetchJSON('/api/status'),
+    fetchJSON('/api/summary'),
+    fetchJSON('/api/traffic?n=40'),
+    fetchJSON('/api/entropy?n=1'),
+    fetchJSON('/api/alerts?n=15'),
+    fetchJSON('/api/security-alerts?limit=15'),
+    fetchJSON('/api/root-cause-reports?limit=8'),
+    fetchJSON('/api/correlation-results?limit=8'),
+    fetchJSON('/api/fused-decisions?limit=8'),
+    fetchJSON('/api/digital-twin/runs?limit=8'),
+    fetchJSON('/api/digital-twin/snapshots?limit=8'),
+    fetchJSON('/api/digital-twin/replays?limit=8'),
+    fetchJSON('/api/blocklist?n=10'),
+    fetchJSON('/api/rl?n=30'),
+    fetchJSON('/api/ml?n=1'),
+  ]);
+
+  renderStatus(status);
+  renderSummary(summary);
+  renderTraffic(traffic);
+  renderEntropy(entropy);
+  renderAlerts(alerts);
+  renderSecurityAlerts(secAlerts);
+  renderRcaFeed(rcaReports);
+  renderCorrFeed(corrResults);
+  renderFusionFeed(fusionResults);
+  renderTwinFeed(twinRuns, twinSnaps, twinReplays);
+  renderBlocklist(blocklist);
+  renderRL(rl);
+  if (ml && ml.latest) {
+    const m = ml.latest;
+    setText('rl-label', `${m.status || '—'} @ ${parseFloat(m.confidence || 0).toFixed(0)}%`);
+  }
+}
+
+// ── Master Control ────────────────────────────────────────────────
+let _activeJobId = null;
+let _jobPollTimer = null;
+
+function toggleControlPanel() {
+  const body = document.getElementById('control-body');
+  const tog  = document.getElementById('control-toggle');
+  body.classList.toggle('collapsed');
+  tog.textContent = body.classList.contains('collapsed') ? '▶ expand' : '▼ collapse';
+}
+
+function ctrlLog(msg) {
+  const el = document.getElementById('control-log');
+  if (el) el.textContent = msg;
+}
+
+async function ctrlPost(path, body) {
+  const opts = { method: 'POST' };
+  if (body) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(`${API}/api/control/${path}`, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
+}
+
+async function ctrlAction(action) {
+  try {
+    ctrlLog(`Running ${action}…`);
+    const data = await ctrlPost(action);
+    if (data.job) {
+      _activeJobId = data.job.id;
+      pollJob(_activeJobId);
+    } else if (data.archived_to) {
+      ctrlLog(`Archived to ${data.archived_to}\nFiles: ${(data.files || []).join(', ')}`);
+    } else {
+      ctrlLog(JSON.stringify(data, null, 2));
+    }
+    refresh();
+  } catch (e) {
+    ctrlLog(`Error: ${e.message}`);
+  }
+}
+
+async function ctrlScenario(id) {
+  try {
+    ctrlLog(`Starting scenario ${id}… (may take 1–2 min)`);
+    const data = await ctrlPost(`scenario/${id}`);
+    _activeJobId = data.job.id;
+    pollJob(_activeJobId);
+  } catch (e) {
+    ctrlLog(`Error: ${e.message}`);
+  }
+}
+
+async function ctrlBatch() {
+  if (!confirm('Run Scenarios 3, 4, 5 with archive + controller restart? (~8 min)')) return;
+  try {
+    ctrlLog('Starting batch evaluation…');
+    const data = await ctrlPost('scenarios/batch', {
+      scenario_ids: ['3', '4', '5'],
+      archive_first: true,
+      restart_controller: true,
+    });
+    _activeJobId = data.job.id;
+    pollJob(_activeJobId);
+  } catch (e) {
+    ctrlLog(`Error: ${e.message}`);
+  }
+}
+
+function pollJob(jobId) {
+  if (_jobPollTimer) clearInterval(_jobPollTimer);
+  _jobPollTimer = setInterval(async () => {
+    try {
+      const data = await fetchJSON(`/api/control/jobs/${jobId}`);
+      if (!data) return;
+      const tail = (data.log_tail || []).join('\n');
+      ctrlLog(`[${data.status}] ${data.name}\n${tail}`);
+      if (data.status !== 'running') {
+        clearInterval(_jobPollTimer);
+        _jobPollTimer = null;
+        refresh();
+      }
+    } catch (_) {}
+  }, 2000);
+}
+
+async function pollControlStatus() {
+  try {
+    const s = await fetchJSON('/api/control/status');
+    if (!s) return;
+    document.querySelectorAll('.ctrl-btn.warn, .ctrl-btn.primary').forEach(btn => {
+      if (btn.textContent.includes('S2') || btn.textContent.includes('S3') ||
+          btn.textContent.includes('batch') || btn.textContent.includes('S4') ||
+          btn.textContent.includes('S5') || btn.textContent.includes('S1')) {
+        btn.disabled = !!s.scenario_running;
+      }
+    });
+  } catch (_) {}
+}
+
+// ── Card info popover (i icons) ───────────────────────────────────
+(function initCardInfoPopover() {
+  const pop = document.getElementById('card-info-popover');
+  if (!pop) return;
+  let openBtn = null;
+
+  function closeInfo() {
+    pop.classList.remove('open');
+    pop.setAttribute('aria-hidden', 'true');
+    if (openBtn) openBtn.classList.remove('is-open');
+    openBtn = null;
+  }
+
+  function placePopover(btn) {
+    const rect = btn.getBoundingClientRect();
+    const margin = 10;
+    const pw = pop.offsetWidth || 320;
+    const ph = pop.offsetHeight || 140;
+    let left = rect.right - pw;
+    let top = rect.bottom + 8;
+    if (left < margin) left = margin;
+    if (left + pw > window.innerWidth - margin) {
+      left = window.innerWidth - pw - margin;
+    }
+    if (top + ph > window.innerHeight - margin) {
+      top = Math.max(margin, rect.top - ph - 8);
+    }
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+  }
+
+  function openInfo(btn) {
+    document.getElementById('cip-title').textContent = btn.dataset.infoTitle || 'Info';
+    document.getElementById('cip-body').textContent = btn.dataset.infoBody || '';
+    document.getElementById('cip-novelty').textContent = btn.dataset.infoNovelty
+      ? `Novelty / phase: ${btn.dataset.infoNovelty}`
+      : '';
+    if (openBtn && openBtn !== btn) openBtn.classList.remove('is-open');
+    openBtn = btn;
+    btn.classList.add('is-open');
+    pop.classList.add('open');
+    pop.setAttribute('aria-hidden', 'false');
+    placePopover(btn);
+  }
+
+  document.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.info-btn');
+    if (btn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (openBtn === btn) {
+        closeInfo();
+      } else {
+        openInfo(btn);
+      }
+      return;
+    }
+    if (pop.classList.contains('open') && !ev.target.closest('#card-info-popover')) {
+      closeInfo();
+    }
+  });
+
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') closeInfo();
+  });
+
+  window.addEventListener('resize', () => {
+    if (openBtn) placePopover(openBtn);
+  });
+  window.addEventListener('scroll', () => {
+    if (openBtn) placePopover(openBtn);
+  }, true);
+})();
+
+// ── Boot ──────────────────────────────────────────────────────────
+drawGauge(1.0, 'NORMAL');
+refresh();
+setInterval(refresh, INTERVAL);
+setInterval(pollControlStatus, 3000);
+pollControlStatus();
+</script>
+
+</body>
+</html>
