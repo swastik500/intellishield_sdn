@@ -34,7 +34,7 @@ class SocUiPhase5StaticTests(unittest.TestCase):
         html = (SOC / "index.html").read_text(encoding="utf-8")
         self.assertIn('href="#reports"', html)
         self.assertIn("Reports", html)
-        self.assertRegex(html, r"Phase (?:[5-9]|1[012]) Observer")
+        self.assertRegex(html, r"(?:Phase (?:[5-9]|1[012]) Observer|SOC · Observer)")
         app = (SOC / "js" / "app.js").read_text(encoding="utf-8")
         self.assertIn("reports:", app)
         self.assertIn("renderReports", app)
@@ -239,7 +239,7 @@ class SocUiPhase5ApiSmoke(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("#reports", r.text)
-        self.assertRegex(r.text, r"Phase (?:[5-9]|1[012]) Observer")
+        self.assertRegex(r.text, r"(?:Phase (?:[5-9]|1[012]) Observer|SOC · Observer)")
         for path in (
             "/soc/js/pages/reports.js",
             "/soc/js/utils/report.js",

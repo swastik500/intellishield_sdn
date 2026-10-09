@@ -1703,10 +1703,82 @@ export async function renderSettings(root) {
         <h3>UI preferences</h3>
         <p class="muted">No browser preference editor existed in the legacy UI. Operational parity does not require one; theme/layout remain fixed in CSS.</p>
       </section>
+      <section class="panel" data-email-panel>
+        <h3>Email Alert Notifications (Gmail SMTP)</h3>
+        <p class="muted">Configured via <code>.env</code> file. Confirmed-attack alerts from R6 Fusion → R7 Verification are dispatched automatically.</p>
+        <div data-email-status-slot><p class="muted">Loading email configuration…</p></div>
+        <div style="margin-top: 12px;">
+          <button type="button" class="btn btn-primary" id="btn-send-test-email">📧 Send Test Email</button>
+        </div>
+        <div id="test-email-result" style="margin-top: 12px; display: none;"></div>
+      </section>
       <div data-identity-slot></div>
       <div data-readiness-slot></div>
     </div>
   `;
+
+  const emailStatusSlot = root.querySelector("[data-email-status-slot]");
+  const testEmailBtn = root.querySelector("#btn-send-test-email");
+  const testEmailResult = root.querySelector("#test-email-result");
+
+  async function loadEmailStatus() {
+    if (!emailStatusSlot) return;
+    try {
+      const info = await api.fetchEmailAlertStatus();
+      if (info && info.state === "LIVE" && info.data) {
+        const d = info.data;
+        const badgeClass = d.is_configured ? "badge-success" : "badge-warn";
+        const badgeText = d.is_configured ? "CONFIGURED & READY" : d.enabled ? "INCOMPLETE CONFIG" : "DISABLED";
+        emailStatusSlot.innerHTML = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 10px;">
+            <div><span class="muted">Status:</span> <span class="badge ${badgeClass}">${badgeText}</span></div>
+            <div><span class="muted">Recipient:</span> <strong>${escapeHtml(d.recipient)}</strong></div>
+            <div><span class="muted">SMTP Host:</span> <code>${escapeHtml(d.smtp_host)}:${d.smtp_port}</code></div>
+            <div><span class="muted">Cooldown:</span> ${d.cooldown_seconds}s</div>
+          </div>
+        `;
+      } else {
+        emailStatusSlot.innerHTML = `<p class="muted">Email status unavailable.</p>`;
+      }
+    } catch (_e) {
+      emailStatusSlot.innerHTML = `<p class="muted">Failed to load email config status.</p>`;
+    }
+  }
+
+  if (testEmailBtn) {
+    testEmailBtn.addEventListener("click", async () => {
+      testEmailBtn.disabled = true;
+      testEmailBtn.textContent = "Sending Test Email…";
+      if (testEmailResult) {
+        testEmailResult.style.display = "block";
+        testEmailResult.className = "banner info";
+        testEmailResult.textContent = "Connecting to SMTP server and transmitting test email…";
+      }
+      try {
+        const res = await api.postTestEmail();
+        testEmailBtn.disabled = false;
+        testEmailBtn.textContent = "📧 Send Test Email";
+        if (testEmailResult) {
+          if (res && res.ok) {
+            testEmailResult.className = "banner success";
+            testEmailResult.innerHTML = `<strong>✅ Test Email Sent:</strong> ${escapeHtml(res.message)}`;
+          } else {
+            testEmailResult.className = "banner danger";
+            testEmailResult.innerHTML = `<strong>❌ Test Email Failed (${escapeHtml(res.status || "ERROR")}):</strong> ${escapeHtml(res.message || "Transmission failed.")}`;
+          }
+        }
+      } catch (err) {
+        testEmailBtn.disabled = false;
+        testEmailBtn.textContent = "📧 Send Test Email";
+        if (testEmailResult) {
+          testEmailResult.className = "banner danger";
+          testEmailResult.innerHTML = `<strong>❌ Request Failed:</strong> ${escapeHtml(err.message || "Failed to reach dashboard API.")}`;
+        }
+      }
+    });
+  }
+
+  loadEmailStatus();
 
   const identitySlot = root.querySelector("[data-identity-slot]");
   const readinessSlot = root.querySelector("[data-readiness-slot]");

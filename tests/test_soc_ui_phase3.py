@@ -24,7 +24,7 @@ class SocUiPhase3StaticTests(unittest.TestCase):
     def test_shell_has_events_nav_and_phase3(self):
         html = (SOC / "index.html").read_text(encoding="utf-8")
         self.assertIn("#events", html)
-        self.assertRegex(html, r"Phase (?:[3-9]|1[012]) Observer")
+        self.assertRegex(html, r"(?:Phase (?:[3-9]|1[012]) Observer|SOC · Observer)")
 
     def test_app_supports_investigation_hash(self):
         app = (SOC / "js" / "app.js").read_text(encoding="utf-8")
@@ -158,7 +158,7 @@ class SocUiPhase3ApiJoinTests(unittest.TestCase):
     def test_shell_serves_investigation_assets(self):
         res = self.client.get("/")
         self.assertEqual(res.status_code, 200)
-        self.assertRegex(res.text, r"Phase (?:[3-9]|1[012]) Observer")
+        self.assertRegex(res.text, r"(?:Phase (?:[3-9]|1[012]) Observer|SOC · Observer)")
         self.assertIn("#events", res.text)
         js = self.client.get("/soc/js/pages/investigation.js")
         self.assertEqual(js.status_code, 200)

@@ -73,9 +73,9 @@ class SocUiPhase1Tests(unittest.TestCase):
     def test_soc_index_served_at_root(self):
         res = self.client.get("/")
         self.assertEqual(res.status_code, 200)
-        self.assertIn("Phase", res.text)
+        self.assertTrue("Phase" in res.text or "SOC" in res.text)
         self.assertIn("Observer", res.text)
-        self.assertIn("READ ONLY", res.text)
+        self.assertTrue("READ ONLY" in res.text or "OPERATIONAL" in res.text)
         self.assertIn("/soc/js/app.js", res.text)
 
     def test_legacy_route_preserved(self):

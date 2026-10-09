@@ -25,3 +25,6 @@ psutil>=5.9.0,<7
 
 # --- Optional evaluation plots (lazy-imported) ---
 # matplotlib>=3.7.0
+
+# --- Email alert notifications (.env loading) ---
+python-dotenv>=1.0.0

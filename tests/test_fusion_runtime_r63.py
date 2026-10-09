@@ -277,7 +277,8 @@ class TestR63CollaborativeToR7(unittest.TestCase):
             self.assertEqual(rec["decision"], "ATTACK")
             self.assertIn("participating", rec)
             # non-fatal write failure
-            bad = append_fusion_trace(out.fused, "/proc/does_not_exist_r63/x.jsonl")
+            with mock.patch("os.makedirs", side_effect=OSError("Permission denied")):
+                bad = append_fusion_trace(out.fused, "/proc/does_not_exist_r63/x.jsonl")
             self.assertFalse(bad)
 
 

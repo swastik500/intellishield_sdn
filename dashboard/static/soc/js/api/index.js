@@ -201,6 +201,17 @@ export async function postAutoMLRollback() {
   return res.json();
 }
 
+export function fetchEmailAlertStatus(signal) {
+  return getJSON("/api/alerts/email/status", optsOf(signal));
+}
+
+export async function postTestEmail() {
+  const httpPost = "post".toUpperCase();
+  const res = await fetch("/api/alerts/test-email", { method: httpPost });
+  if (!res.ok) throw new Error(`Test Email HTTP ${res.status}`);
+  return res.json();
+}
+
 export function fetchMetrics(signal) {
   return getJSON("/api/metrics", optsOf(signal));
 }

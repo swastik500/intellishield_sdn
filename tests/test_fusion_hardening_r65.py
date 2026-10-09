@@ -254,7 +254,8 @@ class TestR65FailureInjection(unittest.TestCase):
                 fh.write("{bad\n")
             rows = read_fused_decision_history(path, limit=10)
             self.assertEqual(len(rows), 1)
-            self.assertFalse(_append(fd, "/proc/nope_r65/x.jsonl"))
+            with mock.patch("os.makedirs", side_effect=OSError("Permission denied")):
+                self.assertFalse(_append(fd, "/proc/nope_r65/x.jsonl"))
 
     def test_r4_r5_r8_unavailable_paths(self):
         # Fusion works without R4/R5/R8 packages in the call

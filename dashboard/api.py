@@ -1402,6 +1402,32 @@ def rollback_automl():
     }
 
 
+# ── Email Alert Notification API Endpoints ────────────────────────────────────
+
+@app.get("/api/alerts/email/status")
+def get_email_alert_status():
+    """Return current email alert configuration status (passwords omitted)."""
+    from alerts import load_email_alert_config
+    cfg = load_email_alert_config()
+    return {
+        "enabled": cfg.enabled,
+        "is_configured": cfg.is_configured,
+        "recipient": cfg.recipient if cfg.is_configured else "(unconfigured)",
+        "smtp_host": cfg.smtp_host,
+        "smtp_port": cfg.smtp_port,
+        "smtp_user": cfg.smtp_user if cfg.is_configured else "(unconfigured)",
+        "cooldown_seconds": cfg.cooldown_seconds,
+        "recovery_enabled": cfg.recovery_enabled,
+    }
+
+
+@app.post("/api/alerts/test-email")
+def trigger_test_email():
+    """Send a diagnostic test email to ALERT_EMAIL_TO using current .env config."""
+    from alerts.test_email import send_test_email
+    return send_test_email()
+
+
 # Phase 1 SOC static assets (CSS/JS modules). Mounted after API routes.
 _SOC_DIR = _STATIC / "soc"
 if _SOC_DIR.is_dir():

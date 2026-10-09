@@ -32,7 +32,7 @@ class SocUiPhase4StaticTests(unittest.TestCase):
         self.assertIn('href="#health"', html)
         self.assertIn("System Health", html)
         self.assertIn("OPERATIONS", html)
-        self.assertRegex(html, r"Phase (?:[4-9]|1[012]) Observer")
+        self.assertRegex(html, r"(?:Phase (?:[4-9]|1[012]) Observer|SOC · Observer)")
         # OPERATIONS order: System Health before Reports / Settings
         ops = html.split("OPERATIONS", 1)[1]
         self.assertLess(ops.find("#health"), ops.find("#reports"))

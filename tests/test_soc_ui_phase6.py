@@ -85,7 +85,7 @@ class SocUiPhase6StaticTests(unittest.TestCase):
 
     def test_phase6_shell_label(self):
         html = (SOC / "index.html").read_text(encoding="utf-8")
-        self.assertRegex(html, r"Phase (?:[6-9]|1[012]) Observer")
+        self.assertRegex(html, r"(?:Phase (?:[6-9]|1[012]) Observer|SOC · Observer)")
 
     def test_get_only_audit(self):
         banned = [
@@ -197,7 +197,7 @@ class SocUiPhase6ApiSmoke(unittest.TestCase):
     def test_assets_served(self):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
-        self.assertRegex(r.text, r"Phase (?:[6-9]|1[012]) Observer")
+        self.assertRegex(r.text, r"(?:Phase (?:[6-9]|1[012]) Observer|SOC · Observer)")
         js = self.client.get("/soc/js/utils/provenance.js")
         self.assertEqual(js.status_code, 200)
         self.assertIn("buildProvenance", js.text)

@@ -529,6 +529,22 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
                     adapters=[LoggingNotificationAdapter()],
                     store=_alert_store,
                 )
+
+                # ── Email alert adapter (additive — never breaks existing alerting) ──
+                try:
+                    from alerts import build_email_adapter
+
+                    _email_adapter = build_email_adapter()
+                    if _email_adapter is not None:
+                        self._alert_manager.add_adapter(_email_adapter)
+                        self.logger.info(
+                            "[ALERTING] Email notification adapter: REGISTERED"
+                        )
+                except Exception as _email_err:
+                    self.logger.info(
+                        "[ALERTING] Email adapter not loaded: %s", _email_err
+                    )
+
                 self.logger.info(
                     "[ALERTING] R8 AlertManager: ACTIVE  store=%s",
                     _alert_store.path,
@@ -1775,6 +1791,7 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
         def _on_verified(result):
             if self._alert_manager is None or not _ALERTING_AVAILABLE:
                 return
+            self.logger.info("[ALERTING] R7 Verification confirmed attack event_id=%s — emitting alert", getattr(result, "event_id", "?"))
             rca_report_id = None
             extra = {}
             correlation_id = None
