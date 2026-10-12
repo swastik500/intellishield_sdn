@@ -103,6 +103,76 @@ export async function getJSON(path, opts = {}) {
   }
 }
 
+/**
+ * POST JSON to a path with a timeout. Throws on non-2xx with a
+ * parsed error (message / detail) attached. Same-origin requests
+ * include cookies (session) by default.
+ *
+ * @param {string} path
+ * @param {object|null} body
+ * @param {{ timeoutMs?: number, signal?: AbortSignal }} [opts]
+ * @returns {Promise<object>} parsed JSON body
+ */
+export async function postJSON(path, body = null, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const onOuterAbort = () => controller.abort();
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      clearTimeout(timer);
+      const err = new Error("Request aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+    opts.signal.addEventListener("abort", onOuterAbort, { once: true });
+  }
+
+  const init = { method: "post".toUpperCase(), signal: controller.signal, cache: "no-store" };
+  if (body != null) {
+    init.headers = { "Content-Type": "application/json", Accept: "application/json" };
+    init.body = JSON.stringify(body);
+  } else {
+    init.headers = { Accept: "application/json" };
+  }
+
+  try {
+    const res = await fetch(path, init);
+    clearTimeout(timer);
+    if (opts.signal) opts.signal.removeEventListener("abort", onOuterAbort);
+
+    let data = {};
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+    if (!res.ok) {
+      const detail =
+        (data && (data.detail || (data.error && data.error.message))) ||
+        res.statusText ||
+        `HTTP ${res.status}`;
+      const err = new Error(
+        typeof detail === "string" ? detail : JSON.stringify(detail)
+      );
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  } catch (err) {
+    clearTimeout(timer);
+    if (opts.signal) opts.signal.removeEventListener("abort", onOuterAbort);
+    if (err && err.name === "AbortError") {
+      const e = new Error("Request timeout");
+      e.name = "AbortError";
+      throw e;
+    }
+    throw err;
+  }
+}
+
 export function withEmpty(result, isEmpty) {
   if (result.state !== DataState.LIVE || result.data == null) return result;
   if (isEmpty(result.data)) {

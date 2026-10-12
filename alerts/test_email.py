@@ -3,125 +3,286 @@ Diagnostic test email function and CLI utility for IntelliShield SDN.
 
 Sends a single labeled test email using the project's existing .env settings
 and EmailNotificationAdapter without requiring a real network attack.
+
+Design notes:
+  - Uses a dedicated, narrowly scoped test-email path that shares the existing
+    SMTP configuration and sending implementation (EmailNotificationAdapter).
+  - Does NOT create a fake verified attack, security event, or mitigation
+    alert, and does NOT write anything into the R8 alert history (alerts.jsonl).
+  - Uses the adapter's asynchronous attempt tracking and waits for the exact
+    terminal outcome (sent / failed) — never reports success merely because a
+    background thread was started.
+  - Test emails are isolated from real attack-alert cooldowns via a separate
+    shared tracker keyed to the SYSTEM/DIAGNOSTIC-TEST alert identity, so a
+    test email can never suppress (or be suppressed by) a genuine security
+    alert.
+  - A small in-memory rate limiter prevents abuse / duplicate concurrent sends.
+  - SMTP credentials are never returned or logged.
 """
 
 from __future__ import annotations
 
 import logging
 import sys
+import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Deque, Dict, Optional
 
 from shared_contracts.enums import AlertType, Severity
 from shared_contracts.models import AlertEvent
 from alerts.config import EmailAlertConfig, load_email_alert_config
-from alerts.email_adapter import EmailNotificationAdapter
+from alerts.cooldown import EmailCooldownTracker
+from alerts.email_adapter import DeliveryStatus, EmailNotificationAdapter
 
 logger = logging.getLogger("intellishield.alerts.test_email")
+
+# The adapter's SMTP connect timeout is 15s; wait longer than that so a slow
+# (but still in-flight) attempt is never misreported as a timeout.
+_WAIT_TIMEOUT_SEC = 30.0
+
+# Abuse control: max test emails per client key per window.
+_RATE_LIMIT_MAX_HITS = 5
+_RATE_LIMIT_WINDOW_SEC = 60
+
+
+class _RateLimiter:
+    """Tiny thread-safe sliding-window rate limiter (no distributed infra)."""
+
+    def __init__(self, max_hits: int, window_seconds: int) -> None:
+        self._max_hits = max(1, max_hits)
+        self._window_seconds = max(1, window_seconds)
+        self._lock = threading.Lock()
+        self._hits: Dict[str, Deque[float]] = {}
+
+    def allow(self, key: str) -> bool:
+        now = time.time()
+        with self._lock:
+            q = self._hits.setdefault(key, deque())
+            cutoff = now - self._window_seconds
+            while q and q[0] < cutoff:
+                q.popleft()
+            if len(q) >= self._max_hits:
+                return False
+            q.append(now)
+            return True
+
+    def reset(self, key: Optional[str] = None) -> None:
+        with self._lock:
+            if key is None:
+                self._hits.clear()
+            else:
+                self._hits.pop(key, None)
+
+
+# Shared, resettable state for test-email concurrency + abuse control.
+# cooldown_seconds=0 makes the tracker act as a pure in-flight mutex:
+# a key can be reserved exactly once at a time and is immediately
+# available again after the attempt finishes (no persistent cooldown),
+# so sequential retries always work while concurrent duplicate sends
+# are suppressed.
+_TEST_EMAIL_INFLIGHT = EmailCooldownTracker(cooldown_seconds=0)
+_TEST_EMAIL_RATE_LIMIT = _RateLimiter(
+    max_hits=_RATE_LIMIT_MAX_HITS, window_seconds=_RATE_LIMIT_WINDOW_SEC
+)
+
+
+def reset_test_email_state() -> None:
+    """Reset shared test-email state (tests / reconnect)."""
+    _TEST_EMAIL_INFLIGHT.clear()
+    _TEST_EMAIL_RATE_LIMIT.reset()
+
+
+def _build_test_alert(label: Optional[str] = None) -> AlertEvent:
+    """Build a clearly identified, non-security test AlertEvent.
+
+    alert_type=SYSTEM (not DETECTION/MITIGATION) and a DIAGNOSTIC_TEST hint
+    keep it distinct from any real attack alert.
+
+    ``label`` (e.g. "S2 SYN Flood") identifies which Control Lab
+    action triggered the test. It is surfaced in the email's
+    "Detection Source" field (``detector_path``) and in the
+    message body so the recipient can see which button was used.
+    """
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    # Sanitize the label (bounded length, printable only) so it
+    # can never inject control characters into the email.
+    safe_label = None
+    if label:
+        cleaned = "".join(
+            ch for ch in str(label) if ch.isprintable()
+        ).strip()[:128]
+        if cleaned:
+            safe_label = cleaned
+    detector = safe_label or "control-lab"
+    message = (
+        "This is a manual email-delivery test initiated from the "
+        "IntelliShield Control Lab. No security event occurred."
+    )
+    if safe_label:
+        message = f"Triggered by Control Lab action: {safe_label}. " + message
+    return AlertEvent(
+        alert_id=f"TEST-EMAIL-{int(time.time() * 1000)}",
+        timestamp=datetime.now(timezone.utc),
+        severity=Severity.LOW,
+        alert_type=AlertType.SYSTEM,
+        title="IntelliShield SDN — Test Email",
+        message=message,
+        event_id=f"evt_test_email_{int(time.time() * 1000)}",
+        source="control-lab",
+        evidence={
+            "attack_hint": "DIAGNOSTIC_TEST",
+            "description": (
+                "Manual SMTP delivery test triggered from the Control Lab panel."
+            ),
+            "triggered_at": now_str,
+            "detector_path": detector,
+            "detector_source": "manual_test_trigger",
+        },
+    )
+
+
+def _result(
+    ok: bool,
+    status: str,
+    message: str,
+    cfg: EmailAlertConfig,
+    *,
+    delivery_status: str = "",
+    attempt_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "ok": ok,
+        "status": status,
+        "message": message,
+        "recipient": cfg.recipient or "(unconfigured)",
+        "smtp_host": cfg.smtp_host,
+        "smtp_port": cfg.smtp_port,
+        "smtp_user": cfg.smtp_user or "(unconfigured)",
+        "cooldown_seconds": cfg.cooldown_seconds,
+        "delivery_status": delivery_status,
+        "attempt_id": attempt_id,
+    }
 
 
 def send_test_email(
     config: Optional[EmailAlertConfig] = None,
+    *,
+    client_key: Optional[str] = None,
+    label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Send a single diagnostic test email to ALERT_EMAIL_TO.
 
-    Returns a dict summary with status, recipient, host, and safe message.
+    ``label`` (e.g. "S2 SYN Flood") identifies which Control Lab
+    action triggered the test and is shown in the email's
+    "Detection Source" field and message body.
+
+    Returns a dict summary with a truthful status:
+      SENT, FAILED, UNCONFIGURED, SUPPRESSED, RATE_LIMITED, TIMEOUT, ERROR.
+
     Never exposes passwords or sensitive credentials.
     """
-    try:
-        cfg = config or load_email_alert_config()
+    # Lazy import so tests can patch alerts.config.load_email_alert_config.
+    from alerts.config import load_email_alert_config as _load_cfg
 
-        if not cfg.is_configured:
-            reasons = []
-            if not cfg.enabled:
-                reasons.append("ALERT_EMAIL_ENABLED!=true")
-            if not cfg.recipient:
-                reasons.append("ALERT_EMAIL_TO is empty")
-            if not cfg.smtp_user:
-                reasons.append("ALERT_SMTP_USER is empty")
-            if not cfg.smtp_password:
-                reasons.append("ALERT_SMTP_PASSWORD is empty")
+    cfg = config or _load_cfg()
 
-            reason_str = ", ".join(reasons) if reasons else "unconfigured"
-            return {
-                "ok": False,
-                "status": "UNCONFIGURED",
-                "message": (
-                    f"Email alerts are disabled or incomplete ({reason_str}). "
-                    "Please set ALERT_EMAIL_ENABLED=true and configure recipient/SMTP credentials in .env."
-                ),
-                "recipient": cfg.recipient or "(unconfigured)",
-                "smtp_host": cfg.smtp_host,
-                "smtp_port": cfg.smtp_port,
-                "smtp_user": cfg.smtp_user or "(unconfigured)",
-            }
-
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-        # Build a synthetic test AlertEvent
-        test_alert = AlertEvent(
-            alert_id=f"TEST-ALERT-{int(time.time())}",
-            timestamp=datetime.now(timezone.utc),
-            severity=Severity.LOW,
-            alert_type=AlertType.SYSTEM,
-            title="IntelliShield SDN — Diagnostic Test Email",
-            message="Diagnostic test email triggered by administrator.",
-            event_id=f"evt_test_{int(time.time())}",
-            source="192.168.1.100",
-            evidence={
-                "attack_hint": "DIAGNOSTIC TEST",
-                "target_ip": "10.0.0.1",
-                "description": "This is a manual diagnostic test email to verify SMTP configuration and delivery.",
-                "triggered_at": now_str,
-                "verification_confidence": 1.0,
-                "detector_source": "manual_test_trigger",
-            },
+    if not cfg.is_configured:
+        reasons = []
+        if not cfg.enabled:
+            reasons.append("ALERT_EMAIL_ENABLED!=true")
+        if not cfg.recipient:
+            reasons.append("ALERT_EMAIL_TO is empty")
+        if not cfg.smtp_user:
+            reasons.append("ALERT_SMTP_USER is empty")
+        if not cfg.smtp_password:
+            reasons.append("ALERT_SMTP_PASSWORD is empty")
+        reason_str = ", ".join(reasons) if reasons else "unconfigured"
+        return _result(
+            False,
+            "UNCONFIGURED",
+            (
+                f"Email alerts are disabled or incomplete ({reason_str}). "
+                "Please set ALERT_EMAIL_ENABLED=true and configure "
+                "recipient/SMTP credentials in .env."
+            ),
+            cfg,
         )
 
-        adapter = EmailNotificationAdapter(config=cfg)
-        success = adapter.send_sync(test_alert)
+    # Abuse control (per client key).
+    key = client_key or "anonymous"
+    if not _TEST_EMAIL_RATE_LIMIT.allow(key):
+        return _result(
+            False,
+            "RATE_LIMITED",
+            (
+                f"Too many test emails (limit {_RATE_LIMIT_MAX_HITS} per "
+                f"{_RATE_LIMIT_WINDOW_SEC}s). Please wait before retrying."
+            ),
+            cfg,
+            delivery_status="rate_limited",
+        )
 
-        if success:
-            return {
-                "ok": True,
-                "status": "SENT",
-                "message": f"Test email sent successfully to {cfg.recipient} via {cfg.smtp_host}:{cfg.smtp_port}.",
-                "recipient": cfg.recipient,
-                "smtp_host": cfg.smtp_host,
-                "smtp_port": cfg.smtp_port,
-                "smtp_user": cfg.smtp_user,
-            }
-        else:
-            return {
-                "ok": False,
-                "status": "FAILED",
-                "message": (
-                    f"Failed to send email to {cfg.recipient}. Check SMTP credentials (App Password), "
-                    f"port ({cfg.smtp_port}), host ({cfg.smtp_host}), and network connectivity."
-                ),
-                "recipient": cfg.recipient,
-                "smtp_host": cfg.smtp_host,
-                "smtp_port": cfg.smtp_port,
-                "smtp_user": cfg.smtp_user,
-            }
+    # _build_test_alert sanitizes the label (bounded, printable).
+    test_alert = _build_test_alert(label)
 
-    except Exception as exc:  # noqa: BLE001
-        # Sanitize exception message to prevent any accidental credential leak
-        err_msg = str(exc)
-        if config and config.smtp_password and config.smtp_password in err_msg:
-            err_msg = err_msg.replace(config.smtp_password, "*****")
+    # Dedicated adapter that shares SMTP config + sending implementation, but
+    # uses the isolated test-email in-flight tracker (never the real attack
+    # alert cooldown).
+    adapter = EmailNotificationAdapter(config=cfg, cooldown=_TEST_EMAIL_INFLIGHT)
 
-        logger.error("[TestEmail] Diagnostic email execution failed: %s", err_msg)
-        return {
-            "ok": False,
-            "status": "ERROR",
-            "message": f"An error occurred while sending test email: {err_msg}",
-            "recipient": getattr(config, "recipient", "") or "(unknown)",
-            "smtp_host": getattr(config, "smtp_host", "smtp.gmail.com"),
-            "smtp_port": getattr(config, "smtp_port", 587),
-        }
+    # Queue the async attempt. Returns None when suppressed (concurrent
+    # duplicate in-flight for the same key).
+    attempt_id = adapter.send(test_alert)
+    if attempt_id is None:
+        return _result(
+            False,
+            "SUPPRESSED",
+            (
+                "A test email is already in progress for this recipient. "
+                "Please wait for it to finish before sending another."
+            ),
+            cfg,
+            delivery_status="suppressed_by_cooldown",
+        )
+
+    # Wait for the exact attempt to reach a terminal state.
+    attempt = adapter.wait_for_attempt(attempt_id, timeout=_WAIT_TIMEOUT_SEC)
+    if attempt is None:
+        return _result(
+            False,
+            "TIMEOUT",
+            (
+                "Timed out waiting for the email attempt to complete "
+                f"({_WAIT_TIMEOUT_SEC}s)."
+            ),
+            cfg,
+            delivery_status="timeout",
+            attempt_id=attempt_id,
+        )
+
+    if attempt.status == DeliveryStatus.SENT:
+        return _result(
+            True,
+            "SENT",
+            f"Test email sent successfully to {cfg.recipient}. Check your inbox and spam folder.",
+            cfg,
+            delivery_status="sent",
+            attempt_id=attempt_id,
+        )
+
+    # FAILED (or any other terminal state).
+    reason = attempt.error or "unknown error"
+    return _result(
+        False,
+        "FAILED",
+        f"Test email failed: {reason}",
+        cfg,
+        delivery_status="failed",
+        attempt_id=attempt_id,
+    )
 
 
 def main() -> None:

@@ -1088,6 +1088,12 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
                         # Store latest entropy metrics for Phase 4 ML hook
                         if entropy_result and hasattr(self, "_last_entropy"):
                             self._last_entropy[dpid] = entropy_result
+                        self.logger.info(
+                            "[DIAG] Entropy analysis: dpid=%d status=%s score=%.4f",
+                            dpid,
+                            entropy_result.get("status", "?"),
+                            entropy_result.get("entropy_score", 0.0),
+                        )
                 except Exception:
                     self.logger.error(
                         "[entropy hook] Error in entropy analysis:\n%s",
@@ -1145,6 +1151,13 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
                                        vec, FEATURE_NAMES)
 
                         ml_status = prediction.get("status", "NORMAL")
+                        self.logger.info(
+                            "[DIAG] ML Detection: dpid=%d status=%s confidence=%.2f%% hint=%s",
+                            dpid,
+                            ml_status,
+                            prediction.get("confidence", 0.0),
+                            explanation.get("attack_type_hint", "UNKNOWN"),
+                        )
                         if ml_status in ("SUSPICIOUS", "ATTACK"):
                             log_ml_alert(dpid, prediction, explanation)
                             self._ml_explainer.print_explanation(explanation)
@@ -1381,6 +1394,7 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
                 and feature_batch
             ):
                 try:
+                    self.logger.info("[DIAG] R6 Fusion: starting collaborative cycle dpid=%d", dpid)
                     r6_owned_cycle = self._run_r6_collaborative_cycle(
                         dpid=dpid,
                         feature_batch=feature_batch,
@@ -1392,6 +1406,7 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
                     )
                     if r6_owned_cycle:
                         ml_attack_mitigated = True  # suppress entropy dual-path
+                        self.logger.info("[DIAG] R6 Fusion: owned cycle dpid=%d", dpid)
                 except Exception:
                     self.logger.error(
                         "[fusion hook] Error — legacy fallback:\n%s",
@@ -1618,10 +1633,10 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
                 if ratio >= RATE_DOMINANCE_RATIO and pkt <= PACKET_ENTROPY_THRESHOLD:
                     return "BURST"
 
-        if dst <= DST_ENTROPY_THRESHOLD and byte <= BYTE_ENTROPY_THRESHOLD:
-            return "UDP_FLOOD"
         if src <= SRC_ENTROPY_THRESHOLD and pkt <= PACKET_ENTROPY_THRESHOLD:
             return "SYN_FLOOD"
+        if dst <= DST_ENTROPY_THRESHOLD and byte <= BYTE_ENTROPY_THRESHOLD:
+            return "UDP_FLOOD"
         if pkt <= PACKET_ENTROPY_THRESHOLD or byte <= BYTE_ENTROPY_THRESHOLD:
             return "VOLUMETRIC_FLOOD"
         return "UNKNOWN"
@@ -1764,12 +1779,18 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
         Alerting/R5 and mitigation are fail-isolated from each other.
         Returns True if handle_alert was invoked.
         """
+        self.logger.info(
+            "[DIAG] _dispatch_verified_mitigation: dpid=%d source=%s status=%s streak=%d warmup=%d",
+            dpid, source_tag, prediction.get("status", "NORMAL"), attack_streak, warmup_cycles_done
+        )
         if self._mitigation is None:
+            self.logger.warning("[DIAG] _dispatch_verified_mitigation: mitigation engine not available")
             return False
 
         if self._verification is None or not _VERIFICATION_AVAILABLE:
             status = str(prediction.get("status", "NORMAL")).upper()
             if status == "ATTACK" and attack_streak < self._attack_confirm:
+                self.logger.info("[DIAG] Legacy path: attack streak %d < %d, not confirmed", attack_streak, self._attack_confirm)
                 return False
             self._mitigation.handle_alert(
                 dpid=dpid,
@@ -1789,9 +1810,31 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
                 min_conf = None
 
         def _on_verified(result):
+            # ── Diagnostic logging — trace every gate in the alert pipeline ──
+            v_status = getattr(result, "status", "?") if result is not None else "None"
+            self.logger.info(
+                "[DIAG] _on_verified called: result=%s status=%s "
+                "mitigation_eligible=%s alert_manager=%s alerting_available=%s",
+                result,
+                v_status,
+                getattr(result, "mitigation_eligible", "?") if result is not None else "N/A",
+                self._alert_manager is not None,
+                _ALERTING_AVAILABLE,
+            )
             if self._alert_manager is None or not _ALERTING_AVAILABLE:
+                self.logger.warning(
+                    "[DIAG] _on_verified: skipping — alert_manager=%s alerting_available=%s",
+                    self._alert_manager is not None,
+                    _ALERTING_AVAILABLE,
+                )
                 return
-            self.logger.info("[ALERTING] R7 Verification confirmed attack event_id=%s — emitting alert", getattr(result, "event_id", "?"))
+            self.logger.info(
+                "[DIAG] R7 Verification result: status=%s mitigation_eligible=%s "
+                "event_id=%s — routing to AlertManager",
+                v_status,
+                getattr(result, "mitigation_eligible", "?"),
+                getattr(result, "event_id", "?"),
+            )
             rca_report_id = None
             extra = {}
             correlation_id = None
@@ -1873,7 +1916,16 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
                 fusion_id=fusion_id,
                 extra_evidence=extra,
             )
-            safe_emit_verification_alert(self._alert_manager, result, ctx)
+            am_result = safe_emit_verification_alert(self._alert_manager, result, ctx)
+            self.logger.info(
+                "[DIAG] AlertManager result: disposition=%s "
+                "adapters_ok=%s adapters_failed=%s adapters_skipped=%s reason=%s",
+                getattr(am_result, "disposition", "None") if am_result is not None else "None",
+                getattr(am_result, "adapters_ok", "?") if am_result is not None else "?",
+                getattr(am_result, "adapters_failed", "?") if am_result is not None else "?",
+                getattr(am_result, "adapters_skipped", "?") if am_result is not None else "?",
+                getattr(am_result, "reason", "?") if am_result is not None else "?",
+            )
 
         outcome = run_verified_mitigation(
             engine=self._verification,
@@ -1890,6 +1942,11 @@ class IntelliShieldFlowMonitor(app_manager.OSKenApp):
             on_verified=_on_verified,
         )
         self._last_verification_outcome = outcome
+        self.logger.info(
+            "[DIAG] run_verified_mitigation outcome: handle_alert_called=%s trace_written=%s",
+            outcome.handle_alert_called,
+            outcome.trace_written,
+        )
         return bool(outcome.handle_alert_called)
 
     def _extract_flow_features(self, dpid: int, stat) -> dict | None:

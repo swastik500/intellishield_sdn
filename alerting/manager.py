@@ -113,20 +113,27 @@ class AlertManager:
         try:
             if result is None:
                 self.metrics.incr("alerts_skipped")
+                logger.info("[DIAG] AlertManager: null verification result, skipping")
                 return AlertProcessResult(
                     disposition=AlertDisposition.SKIPPED,
                     reason="null_verification_result",
                 )
             if not self.config.enabled:
                 self.metrics.incr("alerts_skipped")
+                logger.info("[DIAG] AlertManager: alerting disabled, skipping")
                 return AlertProcessResult(
                     disposition=AlertDisposition.DISABLED,
                     reason="alerting_disabled",
                 )
 
+            logger.info("[DIAG] AlertManager: processing verification result_id=%s status=%s eligible=%s", 
+                       getattr(result, "verification_id", "?"), 
+                       getattr(result, "status", "?"), 
+                       getattr(result, "mitigation_eligible", "?"))
             alert = self.factory.from_verification(result, context)
             if alert is None:
                 self.metrics.incr("alerts_skipped")
+                logger.info("[DIAG] AlertManager: factory returned None, skipping")
                 return AlertProcessResult(
                     disposition=AlertDisposition.SKIPPED,
                     reason="factory_skipped",
@@ -257,6 +264,7 @@ class AlertManager:
 
     def _dispatch(self, alert: AlertEvent) -> tuple:
         if not self.config.dispatch_enabled or not self._adapters:
+            logger.info("[DIAG] AlertManager dispatch: disabled or no adapters (dispatch_enabled=%s, adapters=%d)", self.config.dispatch_enabled, len(self._adapters))
             return 0, 0, 0
         ok = 0
         failed = 0
@@ -264,8 +272,10 @@ class AlertManager:
         for adapter in self._adapters:
             if getattr(adapter, "enabled", True) is False:
                 skipped += 1
+                logger.info("[DIAG] AlertManager dispatch: adapter %s skipped (enabled=False)", getattr(adapter, "name", type(adapter).__name__))
                 continue
             try:
+                logger.info("[DIAG] AlertManager dispatch: sending to adapter %s", getattr(adapter, "name", type(adapter).__name__))
                 adapter.send(alert)
                 ok += 1
                 self.metrics.incr("alerts_dispatched")
@@ -278,4 +288,5 @@ class AlertManager:
                     name,
                     traceback.format_exc(),
                 )
+        logger.info("[DIAG] AlertManager dispatch complete: ok=%d failed=%d skipped=%d", ok, failed, skipped)
         return ok, failed, skipped

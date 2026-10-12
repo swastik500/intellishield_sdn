@@ -66,11 +66,11 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 _HERE     = Path(__file__).parent
 _ROOT     = _HERE.parent
@@ -109,11 +109,13 @@ except ImportError:  # pragma: no cover
 
 try:
     from dashboard.auth import auth_router, load_auth_config
-    from dashboard.auth.errors import AuthError, auth_exception_handler
+    from dashboard.auth.errors import AuthError, auth_exception_handler, authentication_required
+    from dashboard.auth.deps import COOKIE_NAME, resolve_principal
     from dashboard.commands import commands_router
 except ImportError:  # pragma: no cover — script path when dashboard/ is on sys.path
     from auth import auth_router, load_auth_config
-    from auth.errors import AuthError, auth_exception_handler
+    from auth.errors import AuthError, auth_exception_handler, authentication_required
+    from deps import COOKIE_NAME, resolve_principal
     from commands import commands_router
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -1401,8 +1403,40 @@ def rollback_automl():
         "restored_champion": restored.algorithm_name if restored else None,
     }
 
-
 # ── Email Alert Notification API Endpoints ────────────────────────────────────
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client key for rate limiting (never a credential)."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()[:64]
+    if request.client:
+        return (request.client.host or "unknown")[:64]
+    return "unknown"
+
+
+async def _test_email_principal(
+    request: Request,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    is_session: Optional[str] = Cookie(default=None, alias=COOKIE_NAME),
+):
+    """
+    Conditional authentication for the test-email endpoint.
+
+    When authentication is configured (INTELLISHIELD_AUTH_* present), an
+    authenticated principal is required (401 otherwise). When auth is not
+    configured, the lab default remains open (matching /api/control/*).
+    Client-supplied role/permission headers are never trusted.
+    """
+    cfg = load_auth_config()
+    principal = resolve_principal(
+        request, authorization=authorization, session_cookie=is_session
+    )
+    if cfg.configured and principal is None:
+        raise authentication_required()
+    return principal
+
 
 @app.get("/api/alerts/email/status")
 def get_email_alert_status():
@@ -1421,11 +1455,39 @@ def get_email_alert_status():
     }
 
 
+class TestEmailRequest(BaseModel):
+    """Optional label identifying which Control Lab action
+    triggered the test email (e.g. "S2 SYN Flood")."""
+
+    label: Optional[str] = Field(default=None, max_length=128)
+
+
 @app.post("/api/alerts/test-email")
-def trigger_test_email():
-    """Send a diagnostic test email to ALERT_EMAIL_TO using current .env config."""
+async def trigger_test_email(
+    request: Request,
+    body: Optional[TestEmailRequest] = None,
+    principal=Depends(_test_email_principal),
+):
+    """
+    Send a diagnostic test email to ALERT_EMAIL_TO using current .env config.
+
+    Reuses the existing EmailNotificationAdapter + SMTP config. Waits for the
+    actual terminal SMTP outcome (never reports success merely because a
+    background thread started). Does not create or persist any security alert.
+
+    An optional ``label`` (e.g. "S2 SYN Flood") is surfaced in the
+    email's Detection Source field and message body.
+    """
     from alerts.test_email import send_test_email
-    return send_test_email()
+
+    label = body.label if body is not None else None
+    result = send_test_email(client_key=_client_ip(request), label=label)
+    status = result.get("status")
+    if status == "RATE_LIMITED":
+        return JSONResponse(status_code=429, content=result)
+    # SENT / FAILED / UNCONFIGURED / SUPPRESSED / TIMEOUT / ERROR all return
+    # HTTP 200 with a truthful "ok" flag and sanitized "status" + "message".
+    return JSONResponse(status_code=200, content=result)
 
 
 # Phase 1 SOC static assets (CSS/JS modules). Mounted after API routes.

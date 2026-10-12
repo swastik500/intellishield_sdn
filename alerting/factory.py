@@ -6,6 +6,7 @@ Severity via injectable SeverityPolicy (R8.2). AlertEvent schema unchanged.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -18,6 +19,8 @@ from alerting.severity import (
     SeverityEvidence,
     SeverityPolicy,
 )
+
+logger = logging.getLogger("intellishield.alerting.factory")
 
 
 @dataclass(frozen=True)
@@ -102,8 +105,10 @@ class AlertFactory:
         context: Optional[AlertFactoryContext] = None,
     ) -> Optional[AlertEvent]:
         if not self.config.enabled:
+            logger.info("[DIAG] AlertFactory: config disabled, returning None")
             return None
         if not self.should_create(result):
+            logger.info("[DIAG] AlertFactory: should_create=False for status=%s, returning None", getattr(result, "status", "?"))
             return None
 
         ctx = context or AlertFactoryContext()
@@ -145,6 +150,8 @@ class AlertFactory:
             ctx.extra_evidence,
         )
 
+        logger.info("[DIAG] AlertFactory: created alert alert_id=%s type=%s severity=%s hint=%s", 
+                   new_id(), alert_type, severity, attack_hint)
         return AlertEvent(
             alert_id=(ctx.alert_id or new_id()),
             timestamp=utc_now(),
