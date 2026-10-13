@@ -997,3 +997,190 @@ button:hover { border-color: rgba(58,160,255,.45); }
   .pipeline { flex-direction: column; }
   .pipe-arrow { transform: rotate(0deg); }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Visual polish — additive only.
+   Subtle transitions, shadows, and motion. No layout, feature,
+   or behavior changes. All motion respects prefers-reduced-motion.
+   ───────────────────────────────────────────────────────────── */
+
+html { scroll-behavior: smooth; }
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: rgba(58,160,255,.35); color: #fff; }
+
+h1, h2, h3 { text-wrap: balance; }
+
+/* Consistent interactive feedback */
+button,
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-warn,
+.nav-item,
+.badge,
+.observer-pill,
+.nav-tag,
+.phase-pill,
+.health-summary-item,
+.investigate-link,
+.prov-details summary {
+  transition:
+    border-color .15s ease,
+    background-color .15s ease,
+    color .15s ease,
+    box-shadow .15s ease,
+    transform .12s ease;
+}
+
+button:hover {
+  border-color: rgba(58,160,255,.45);
+  transform: translateY(-1px);
+}
+.btn:hover {
+  border-color: rgba(58,160,255,.45);
+  background: rgba(58,160,255,.18);
+  transform: translateY(-1px);
+}
+.btn.ghost:hover { background: rgba(58,160,255,.06); }
+.btn-primary:hover,
+.btn-danger:hover,
+.btn-warn:hover,
+.btn-secondary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(2,6,23,.35);
+}
+button:active, .btn:active { transform: translateY(0); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:disabled:hover, .btn:disabled:hover { transform: none; }
+
+/* Visible keyboard focus */
+button:focus-visible,
+.btn:focus-visible,
+a:focus-visible,
+.nav-item:focus-visible,
+.health-summary-item:focus-visible,
+.controls-row select:focus-visible,
+.controls-row input:focus-visible,
+.identity-field input:focus-visible,
+.prov-details summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Nav items keep their border box so the active state
+   never shifts surrounding layout by a couple of pixels. */
+.nav-item { border: 1px solid transparent; }
+
+/* Cards, panels, and stages: subtle elevation + hover feedback */
+.metric-card,
+.health-card,
+.panel,
+.alert-card,
+.verify-card,
+.chart-panel,
+.pipe-stage,
+.inv-panel,
+.prov-row,
+.state-panel,
+.timeline li {
+  transition:
+    border-color .15s ease,
+    box-shadow .15s ease,
+    background-color .15s ease,
+    transform .12s ease;
+}
+.metric-card,
+.panel,
+.alert-card,
+.verify-card,
+.chart-panel,
+.inv-panel {
+  box-shadow: 0 1px 2px rgba(2,6,23,.35);
+}
+.metric-card:hover,
+.alert-card:hover,
+.health-card:hover,
+.chart-panel:hover {
+  border-color: rgba(58,160,255,.3);
+  box-shadow: 0 4px 16px rgba(2,6,23,.4);
+}
+.health-card-btn:hover .health-card { border-color: rgba(58,160,255,.35); }
+.prov-row:hover { border-color: rgba(58,160,255,.3); }
+
+/* Tables: readable sticky header + soft row hover */
+.data-table tbody tr { transition: background-color .12s ease; }
+.data-table th {
+  background: var(--panel);
+  box-shadow: 0 1px 0 var(--border);
+}
+
+/* Entropy bars animate when values refresh */
+.ent-bar-fill { transition: width .3s ease; }
+
+/* Gentle page fade + loading / status-change motion */
+@keyframes soc-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes soc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}
+@keyframes soc-alert-dot {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(239,68,68,.18); }
+  50% { box-shadow: 0 0 0 6px rgba(239,68,68,.06); }
+}
+#page-root > * { animation: soc-fade-in .22s ease both; }
+.state-loading { animation: soc-pulse 1.6s ease-in-out infinite; }
+.badge-loading { animation: soc-pulse 1.6s ease-in-out infinite; }
+.inv-tl.cat-alert .inv-tl-dot { animation: soc-alert-dot 2.2s ease-in-out infinite; }
+
+/* Unified corner radii across buttons, inputs, and banners */
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-warn { border-radius: 8px; }
+.identity-field input { border-radius: 8px; }
+.advisory.banner { border-radius: 10px; }
+
+/* Slim, subtle scrollbars */
+.sidebar,
+.table-wrap,
+.json-block,
+.cmd-result {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148,163,184,.3) transparent;
+}
+.sidebar::-webkit-scrollbar,
+.table-wrap::-webkit-scrollbar,
+.json-block::-webkit-scrollbar,
+.cmd-result::-webkit-scrollbar { width: 8px; height: 8px; }
+.sidebar::-webkit-scrollbar-thumb,
+.table-wrap::-webkit-scrollbar-thumb,
+.json-block::-webkit-scrollbar-thumb,
+.cmd-result::-webkit-scrollbar-thumb {
+  background: rgba(148,163,184,.25);
+  border-radius: 8px;
+}
+.sidebar::-webkit-scrollbar-track,
+.table-wrap::-webkit-scrollbar-track,
+.json-block::-webkit-scrollbar-track,
+.cmd-result::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

@@ -212,15 +212,17 @@ export async function renderLabControl(root) {
       They do <strong>not</strong> install OpenFlow DROP rules from this page (mitigation remains controller R7 path).
       Legacy Master Control remains at <a href="/legacy">/legacy</a> for fallback.
     </div>
-    ${sectionHeader("Controller status", "")}
+    ${sectionHeader("Controller status", statusBadge("LIVE", "AUTO"))}
     <div data-lab-status class="muted">Loading…</div>
-    ${sectionHeader("Controller & logs", "")}
+    ${sectionHeader("Controller & logs", statusBadge("ADVISORY", "LAB"))}
+    <p class="muted">Start, stop, or restart the OsKen controller and archive its logs.</p>
     <div class="btn-row">
       <button type="button" class="btn-primary" data-lab-action="restart">Restart Controller</button>
       <button type="button" class="btn-danger" data-lab-action="stop">Stop Controller</button>
       <button type="button" class="btn-secondary" data-lab-action="archive">Archive Logs</button>
     </div>
-    ${sectionHeader("Attack scenarios (Mininet)", "")}
+    ${sectionHeader("Attack scenarios (Mininet)", statusBadge("WARN", "TRAFFIC"))}
+    <p class="muted">Launch Mininet scenarios. Amber buttons generate attack traffic; S1 runs a normal baseline.</p>
     <div class="btn-row">
       <button type="button" class="btn-secondary" data-lab-action="s1">S1 Normal</button>
       <button type="button" class="btn-warn" data-lab-action="s2">S2 SYN Flood</button>
@@ -230,7 +232,8 @@ export async function renderLabControl(root) {
       <button type="button" class="btn-warn" data-lab-action="s6">S6 Zero-Day (SSL)</button>
       <button type="button" class="btn-primary" data-lab-action="batch">Run S3+S4+S5 (full eval)</button>
     </div>
-    ${sectionHeader("Evaluation & ML", "")}
+    ${sectionHeader("Evaluation & ML", statusBadge("SNAPSHOT", "ML"))}
+    <p class="muted">Compute metrics, retrain ML models, or bundle the current experiment.</p>
     <div class="btn-row">
       <button type="button" class="btn-secondary" data-lab-action="metrics">Compute Metrics</button>
       <button type="button" class="btn-secondary" data-lab-action="train">Retrain ML Models</button>
@@ -244,7 +247,7 @@ export async function renderLabControl(root) {
     </div>
     <div data-email-result class="muted">No test email sent yet. Click the button to verify SMTP delivery.</div>
     -->
-    ${sectionHeader("Operation log", "")}
+    ${sectionHeader("Operation log", statusBadge("ADVISORY", "LOG"))}
     <pre class="json-block" data-lab-log style="min-height:140px;white-space:pre-wrap">Ready. Click a button to run a lab operation…</pre>
     <p class="muted">Jobs are polled via GET /api/control/jobs/&#123;id&#125; (same as legacy).</p>
   `;

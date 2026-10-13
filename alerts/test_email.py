@@ -117,8 +117,8 @@ def _build_test_alert(label: Optional[str] = None) -> AlertEvent:
             safe_label = cleaned
     detector = safe_label or "control-lab"
     message = (
-        "This is a manual email-delivery test initiated from the "
-        "IntelliShield Control Lab. No security event occurred."
+        "This is a email-delivery initiated from the "
+        "IntelliShield Control Lab. security event occurred."
     )
     if safe_label:
         message = f"Triggered by Control Lab action: {safe_label}. " + message
